@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Infinea AuditMate MVP</title>
+    <meta
+      name="description"
+      content="MVP per monitorare la compliance formativa salute e sicurezza sulla base di dipendenti, obblighi e attestati."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navigazione principale">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">IA</span>
+          <div>
+            <strong>Infinea</strong>
+            <span>AuditMate MVP</span>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Sezioni applicazione">
+          <button class="nav-item is-active" type="button" data-view="dashboard">
+            <span class="nav-icon" data-icon="dashboard"></span>
+            <span>Dashboard</span>
+          </button>
+          <button class="nav-item" type="button" data-view="employees">
+            <span class="nav-icon" data-icon="users"></span>
+            <span>Dipendenti</span>
+          </button>
+          <button class="nav-item" type="button" data-view="gaps">
+            <span class="nav-icon" data-icon="alert"></span>
+            <span>Gap & priorita</span>
+          </button>
+          <button class="nav-item" type="button" data-view="upload">
+            <span class="nav-icon" data-icon="upload"></span>
+            <span>Carica attestato</span>
+          </button>
+          <button class="nav-item" type="button" data-view="matrix">
+            <span class="nav-icon" data-icon="matrix"></span>
+            <span>Matrice regole</span>
+          </button>
+          <button class="nav-item" type="button" data-view="report">
+            <span class="nav-icon" data-icon="report"></span>
+            <span>Audit report</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span>Dati pilota</span>
+          <strong id="pilotCompany">Chimiver</strong>
+          <small id="dataStamp">File Excel importati</small>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <p class="eyebrow">Health & Safety Training Compliance</p>
+            <h1 id="viewTitle">Dashboard compliance</h1>
+            <p id="viewSubtitle">
+              Stato calcolato da anagrafica, matrice obblighi e attestati.
+            </p>
+          </div>
+          <div class="topbar-actions">
+            <label class="date-control" for="asOfDate">
+              <span>Data controllo</span>
+              <input id="asOfDate" type="date" />
+            </label>
+            <button class="button button-primary" type="button" id="quickReportBtn">
+              <span class="button-icon" data-icon="download"></span>
+              CSV gap
+            </button>
+          </div>
+        </header>
+
+        <section class="data-notice" id="dataNotice" aria-live="polite"></section>
+
+        <section id="dashboardView" class="view is-active" aria-label="Dashboard"></section>
+        <section id="employeesView" class="view" aria-label="Dipendenti"></section>
+        <section id="gapsView" class="view" aria-label="Gap e priorita"></section>
+        <section id="uploadView" class="view" aria-label="Carica attestato"></section>
+        <section id="matrixView" class="view" aria-label="Matrice regole"></section>
+        <section id="reportView" class="view" aria-label="Audit report"></section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="data/compliance-data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
