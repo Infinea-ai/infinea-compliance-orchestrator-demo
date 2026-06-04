@@ -11,40 +11,45 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" id="appShell">
       <aside class="sidebar" aria-label="Navigazione principale">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">IA</span>
-          <div>
-            <strong>Infinea</strong>
-            <span>AuditMate MVP</span>
+          <div class="brand-main">
+            <span class="brand-mark" aria-hidden="true">IA</span>
+            <div class="brand-copy">
+              <strong>Infinea</strong>
+              <span>AuditMate MVP</span>
+            </div>
           </div>
+          <button class="sidebar-toggle" type="button" id="sidebarToggle" aria-label="Chiudi barra laterale" aria-expanded="true" title="Chiudi barra laterale">
+            <span class="button-icon" data-icon="sidebar"></span>
+          </button>
         </div>
 
         <nav class="nav" aria-label="Sezioni applicazione">
-          <button class="nav-item is-active" type="button" data-view="dashboard">
+          <button class="nav-item is-active" type="button" data-view="dashboard" title="Dashboard">
             <span class="nav-icon" data-icon="dashboard"></span>
-            <span>Dashboard</span>
+            <span class="nav-label">Dashboard</span>
           </button>
-          <button class="nav-item" type="button" data-view="employees">
+          <button class="nav-item" type="button" data-view="employees" title="Dipendenti">
             <span class="nav-icon" data-icon="users"></span>
-            <span>Dipendenti</span>
+            <span class="nav-label">Dipendenti</span>
           </button>
-          <button class="nav-item" type="button" data-view="gaps">
+          <button class="nav-item" type="button" data-view="gaps" title="Gap & priorità">
             <span class="nav-icon" data-icon="alert"></span>
-            <span>Gap & priorita</span>
+            <span class="nav-label">Gap & priorità</span>
           </button>
-          <button class="nav-item" type="button" data-view="upload">
+          <button class="nav-item" type="button" data-view="upload" title="Carica attestato">
             <span class="nav-icon" data-icon="upload"></span>
-            <span>Carica attestato</span>
+            <span class="nav-label">Carica attestato</span>
           </button>
-          <button class="nav-item" type="button" data-view="matrix">
+          <button class="nav-item" type="button" data-view="matrix" title="Matrice regole">
             <span class="nav-icon" data-icon="matrix"></span>
-            <span>Matrice regole</span>
+            <span class="nav-label">Matrice regole</span>
           </button>
-          <button class="nav-item" type="button" data-view="report">
+          <button class="nav-item" type="button" data-view="report" title="Audit report">
             <span class="nav-icon" data-icon="report"></span>
-            <span>Audit report</span>
+            <span class="nav-label">Audit report</span>
           </button>
         </nav>
 
@@ -80,7 +85,7 @@
 
         <section id="dashboardView" class="view is-active" aria-label="Dashboard"></section>
         <section id="employeesView" class="view" aria-label="Dipendenti"></section>
-        <section id="gapsView" class="view" aria-label="Gap e priorita"></section>
+        <section id="gapsView" class="view" aria-label="Gap e priorità"></section>
         <section id="uploadView" class="view" aria-label="Carica attestato"></section>
         <section id="matrixView" class="view" aria-label="Matrice regole"></section>
         <section id="reportView" class="view" aria-label="Audit report"></section>

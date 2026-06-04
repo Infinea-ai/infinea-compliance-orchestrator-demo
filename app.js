@@ -3,6 +3,7 @@
 
   const source = window.INFINEA_COMPLIANCE_DATA;
   const LOCAL_UPLOAD_KEY = "infinea.auditmate.uploadedCertificates.v1";
+  const LOCAL_SIDEBAR_KEY = "infinea.auditmate.sidebarCollapsed.v1";
 
   const icons = {
     dashboard:
@@ -23,6 +24,8 @@
       '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>',
     upload:
       '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
+    sidebar:
+      '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m15 9-3 3 3 3"/></svg>',
   };
 
   const titles = {
@@ -35,7 +38,7 @@
       "Vista per persona con stato compliance, gap e attestati collegati.",
     ],
     gaps: [
-      "Gap & priorita",
+      "Gap & priorità",
       "Azioni ordinate per urgenza: scaduti, mancanti e attestati in scadenza.",
     ],
     upload: [
@@ -131,6 +134,8 @@
     gapStatus: "critical",
     gapDepartment: "all",
     gapCategory: "all",
+    uploadEmployeeQuery: "",
+    uploadPickerOpen: false,
     uploadEmployeeId: "",
     uploadObligationId: "",
     uploadIssueDate: todayISO(),
@@ -139,6 +144,7 @@
     uploadFileName: "",
     uploadNote: "",
     uploadedCertificates: loadUploadedCertificates(),
+    sidebarCollapsed: loadSidebarCollapsed(),
     matrixSearch: "",
     model: null,
   };
@@ -152,6 +158,7 @@
 
     cacheElements();
     decorateIcons(document);
+    applySidebarState();
     initMeta();
     bindEvents();
     els.asOfDate.value = state.asOf;
@@ -159,6 +166,8 @@
   }
 
   function cacheElements() {
+    els.appShell = document.getElementById("appShell");
+    els.sidebarToggle = document.getElementById("sidebarToggle");
     els.navItems = Array.from(document.querySelectorAll(".nav-item"));
     els.views = {
       dashboard: document.getElementById("dashboardView"),
@@ -199,6 +208,12 @@
       downloadGapsCsv();
     });
 
+    els.sidebarToggle.addEventListener("click", () => {
+      state.sidebarCollapsed = !state.sidebarCollapsed;
+      saveSidebarCollapsed(state.sidebarCollapsed);
+      applySidebarState();
+    });
+
     document.addEventListener("input", (event) => {
       const key = event.target.dataset.filter;
       if (!key) return;
@@ -227,6 +242,14 @@
     });
 
     document.addEventListener("click", (event) => {
+      const insideUploadPicker = event.target.closest(".person-search");
+      if (state.uploadPickerOpen && state.view === "upload" && !insideUploadPicker) {
+        state.uploadPickerOpen = false;
+        state.uploadEmployeeQuery = "";
+        renderCurrentView();
+        return;
+      }
+
       const target = event.target.closest("[data-action]");
       if (!target) return;
 
@@ -255,6 +278,21 @@
       if (action === "start-upload") {
         startUploadFor(target.dataset.employeeId, target.dataset.obligationId);
       }
+      if (action === "select-upload-employee") {
+        selectUploadEmployee(target.dataset.employeeId);
+      }
+      if (action === "open-upload-picker") {
+        if (state.uploadPickerOpen) return;
+        state.uploadPickerOpen = true;
+        renderCurrentViewPreservingFocus(target);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !state.uploadPickerOpen || state.view !== "upload") return;
+      state.uploadPickerOpen = false;
+      state.uploadEmployeeQuery = "";
+      renderCurrentView();
     });
   }
 
@@ -265,13 +303,21 @@
       state.uploadExpiryDate = "";
       state.uploadFileName = "";
     }
+    if (key === "uploadEmployeeQuery") {
+      state.uploadPickerOpen = true;
+    }
     if (key === "uploadObligationId" || key === "uploadIssueDate") {
       state.uploadExpiryDate = defaultExpiryForUpload();
     }
   }
 
   function shouldRenderWhileTyping(key) {
-    return key === "employeeSearch" || key === "gapSearch" || key === "matrixSearch";
+    return (
+      key === "employeeSearch" ||
+      key === "gapSearch" ||
+      key === "matrixSearch" ||
+      key === "uploadEmployeeQuery"
+    );
   }
 
   function renderCurrentViewPreservingFocus(target) {
@@ -304,6 +350,18 @@
     els.viewTitle.textContent = titles[view][0];
     els.viewSubtitle.textContent = titles[view][1];
     renderCurrentView();
+  }
+
+  function applySidebarState() {
+    if (!els.appShell || !els.sidebarToggle) return;
+    const collapsed = state.sidebarCollapsed;
+    els.appShell.classList.toggle("is-sidebar-collapsed", collapsed);
+    els.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+    els.sidebarToggle.setAttribute(
+      "aria-label",
+      collapsed ? "Apri barra laterale" : "Chiudi barra laterale"
+    );
+    els.sidebarToggle.title = collapsed ? "Apri barra laterale" : "Chiudi barra laterale";
   }
 
   function renderAll() {
@@ -341,9 +399,9 @@
     const critical = s.expired + s.missing + s.incomplete;
     const readiness = percent(s.compliantToday, s.totalObligations);
     const cleanRate = percent(s.valid, s.totalObligations);
-    const topDepartments = model.departmentStats
+    const chartDepartments = model.obligationDepartmentStats
       .slice()
-      .sort((a, b) => b.critical - a.critical || b.alerts - a.alerts)
+      .sort((a, b) => b.total - a.total || a.department.localeCompare(b.department))
       .slice(0, 6);
     const topUrgent = model.priorityList.slice(0, 8);
 
@@ -351,67 +409,50 @@
       <div class="grid grid-kpis">
         ${kpiCard("Audit readiness", `${readiness}%`, `${s.compliantToday}/${s.totalObligations} obblighi compliant oggi`, readiness, "success")}
         ${kpiCard("Senza alert", `${cleanRate}%`, `${s.valid}/${s.totalObligations} obblighi pienamente validi`, cleanRate, "info")}
-        ${kpiCard("Criticita", String(critical), `${s.expired} scaduti, ${s.missing} mancanti`, percent(critical, s.totalObligations), "danger")}
         ${kpiCard("Alert scadenza", String(s.due30 + s.due60 + s.due90), `${s.due30} entro 30g, ${s.due60} entro 60g, ${s.due90} entro 90g`, percent(s.due30 + s.due60 + s.due90, s.totalObligations), "warning")}
+        ${kpiCard("Criticita", String(critical), `${s.expired} scaduti, ${s.missing} mancanti`, percent(critical, s.totalObligations), "danger")}
       </div>
 
-      <div class="grid grid-two" style="margin-top:16px">
+      <div class="dashboard-overview">
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h2>Stato obblighi</h2>
-              <p>Gli obblighi in scadenza sono ancora compliant oggi, ma generano alert operativi.</p>
+              <h2>Compliance per Reparto</h2>
+              <p>Distribuzione degli obblighi per reparto: conformi, in scadenza e non conformi.</p>
             </div>
             <span class="badge ${readiness >= 75 ? "badge-success" : readiness >= 60 ? "badge-warning" : "badge-danger"}">${readiness}% readiness</span>
           </div>
-          ${stackedBar([
-            ["valid", s.valid],
-            ["due90", s.due90],
-            ["due60", s.due60],
-            ["due30", s.due30],
-            ["expired", s.expired],
-            ["missing", s.missing + s.incomplete],
-          ], s.totalObligations)}
-          <div class="legend">
-            ${legendItem("valid", `${s.valid} validi`)}
-            ${legendItem("due30", `${s.due30 + s.due60 + s.due90} in scadenza`)}
-            ${legendItem("expired", `${s.expired} scaduti`)}
-            ${legendItem("missing", `${s.missing + s.incomplete} mancanti/incompleti`)}
-          </div>
-          <div class="mini-chart" style="margin-top:22px">
-            ${topDepartments.map((dept) => barRow(dept.department, dept.critical + dept.alerts, Math.max(1, topDepartments[0].critical + topDepartments[0].alerts))).join("")}
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
+          ${complianceDepartmentChart(chartDepartments)}
+          <div class="chart-embedded-status">
             <div>
-              <h2>Priorita operative</h2>
-              <p>Azioni da validare o pianificare per prime.</p>
-            </div>
-            <button class="button button-ghost" type="button" data-action="view-gaps">Vedi tutto</button>
-          </div>
-          <div class="priority-list">
-            ${topUrgent.map(priorityItem).join("") || emptySmall("Nessuna priorita aperta.")}
-          </div>
-        </section>
-      </div>
-
-      <div class="grid grid-two" style="margin-top:16px">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Dipendenti per stato</h2>
+              <h3>Dipendenti per stato</h3>
               <p>Classificazione basata sugli obblighi assegnati a ciascun dipendente.</p>
             </div>
-          </div>
-          <div class="grid grid-three">
-            ${employeeStatusCard("compliant", model.employeeStatusCounts.compliant)}
-            ${employeeStatusCard("atRisk", model.employeeStatusCounts.atRisk)}
-            ${employeeStatusCard("nonCompliant", model.employeeStatusCounts.nonCompliant)}
+            <div class="dashboard-status-grid">
+              ${employeeStatusCard("compliant", model.employeeStatusCounts.compliant)}
+              ${employeeStatusCard("atRisk", model.employeeStatusCounts.atRisk)}
+              ${employeeStatusCard("nonCompliant", model.employeeStatusCounts.nonCompliant)}
+            </div>
           </div>
         </section>
 
+        <div class="dashboard-side">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Priorità operative</h2>
+                <p>Azioni da validare o pianificare per prime.</p>
+              </div>
+              <button class="button button-ghost" type="button" data-action="view-gaps">Vedi tutto</button>
+            </div>
+            <div class="priority-list compact">
+              ${topUrgent.slice(0, 5).map(priorityItem).join("") || emptySmall("Nessuna priorità aperta.")}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="dashboard-summary">
         <section class="panel">
           <div class="panel-header">
             <div>
@@ -449,50 +490,52 @@
     }
 
     els.views.employees.innerHTML = `
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Registro dipendenti</h2>
-            <p>${filtered.length} risultati filtrati su ${model.employees.length} dipendenti.</p>
+      <div class="employees-layout">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Registro dipendenti</h2>
+              <p>${filtered.length} risultati filtrati su ${model.employees.length} dipendenti. Seleziona un nome per aggiornare il dettaglio a destra.</p>
+            </div>
           </div>
-        </div>
-        <div class="filters">
-          <input data-filter="employeeSearch" value="${escapeAttr(state.employeeSearch)}" placeholder="Cerca nome, mansione, reparto..." />
-          <select data-filter="employeeStatus">
-            ${option("all", "Tutti gli stati", state.employeeStatus)}
-            ${option("compliant", "Compliant", state.employeeStatus)}
-            ${option("atRisk", "Compliant con alert", state.employeeStatus)}
-            ${option("nonCompliant", "Non compliant", state.employeeStatus)}
-          </select>
-          <select data-filter="employeeDepartment">
-            ${option("all", "Tutti i reparti", state.employeeDepartment)}
-            ${departments.map((dept) => option(dept, dept, state.employeeDepartment)).join("")}
-          </select>
-          <button class="button" type="button" data-action="download-gaps">
-            <span class="button-icon" data-icon="download"></span>
-            CSV gap
-          </button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Dipendente</th>
-                <th>Reparto</th>
-                <th>Mansione</th>
-                <th>Obblighi</th>
-                <th>Criticita</th>
-                <th>Alert</th>
-                <th>Stato</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filtered.map(employeeRow).join("")}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      ${renderEmployeeDetail()}
+          <div class="filters">
+            <input data-filter="employeeSearch" value="${escapeAttr(state.employeeSearch)}" placeholder="Cerca nome, mansione, reparto..." />
+            <select data-filter="employeeStatus">
+              ${option("all", "Tutti gli stati", state.employeeStatus)}
+              ${option("compliant", "Compliant", state.employeeStatus)}
+              ${option("atRisk", "Compliant con alert", state.employeeStatus)}
+              ${option("nonCompliant", "Non compliant", state.employeeStatus)}
+            </select>
+            <select data-filter="employeeDepartment">
+              ${option("all", "Tutti i reparti", state.employeeDepartment)}
+              ${departments.map((dept) => option(dept, dept, state.employeeDepartment)).join("")}
+            </select>
+            <button class="button" type="button" data-action="download-gaps">
+              <span class="button-icon" data-icon="download"></span>
+              CSV gap
+            </button>
+          </div>
+          <div class="table-wrap employees-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dipendente</th>
+                  <th>Reparto</th>
+                  <th>Mansione</th>
+                  <th>Obblighi</th>
+                  <th>Criticita</th>
+                  <th>Alert</th>
+                  <th>Stato</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filtered.map(employeeRow).join("")}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        ${renderEmployeeDetail()}
+      </div>
     `;
   }
 
@@ -500,7 +543,7 @@
     const model = state.model;
     const aggregate = model.employeeMap.get(state.selectedEmployeeId);
     if (!aggregate) {
-      return `<section class="empty detail-panel"><div><h2>Nessun dipendente selezionato</h2><p>Seleziona una riga per vedere il dettaglio degli obblighi.</p></div></section>`;
+      return `<section class="empty employee-detail-panel"><div><h2>Nessun dipendente selezionato</h2><p>Seleziona una riga per vedere il dettaglio degli obblighi.</p></div></section>`;
     }
 
     const urgent = aggregate.obligations
@@ -508,7 +551,7 @@
       .sort(sortByPriority);
 
     return `
-      <section class="panel detail-panel">
+      <section class="panel employee-detail-panel">
         <div class="panel-header">
           <div>
             <h2>${escapeHtml(aggregate.employee.name)} ${escapeHtml(aggregate.employee.surname)}</h2>
@@ -522,7 +565,7 @@
           ${detailStat(aggregate.alerts, "Alert scadenza")}
           ${detailStat(aggregate.critical, "Criticita")}
         </div>
-        <div class="table-wrap" style="margin-top:16px">
+        <div class="table-wrap employee-obligation-table">
           <table>
             <thead>
               <tr>
@@ -609,7 +652,7 @@
           <table>
             <thead>
               <tr>
-                <th>Priorita</th>
+                <th>Priorità</th>
                 <th>Dipendente</th>
                 <th>Obbligo</th>
                 <th>Reparto</th>
@@ -630,11 +673,18 @@
 
   function renderUpload() {
     const model = state.model;
-    const candidates = model.employeeAggregates
+    const allCandidates = model.employeeAggregates
       .filter((item) => item.critical > 0)
       .sort((a, b) => b.critical - a.critical || a.employee.surname.localeCompare(b.employee.surname));
+    const query = normalizeText(state.uploadEmployeeQuery);
+    const candidates = allCandidates.filter((item) => {
+      const text = normalizeText(
+        `${item.employee.name} ${item.employee.surname} ${item.employee.department} ${item.employee.job} ${item.employee.id}`
+      );
+      return !query || text.includes(query);
+    });
 
-    if (!candidates.length) {
+    if (!allCandidates.length) {
       els.views.upload.innerHTML = `
         <section class="empty">
           <div>
@@ -647,8 +697,8 @@
       return;
     }
 
-    if (!state.uploadEmployeeId || !candidates.some((item) => item.employee.id === state.uploadEmployeeId)) {
-      state.uploadEmployeeId = candidates[0].employee.id;
+    if (!state.uploadEmployeeId || !allCandidates.some((item) => item.employee.id === state.uploadEmployeeId)) {
+      state.uploadEmployeeId = allCandidates[0].employee.id;
       state.uploadObligationId = "";
       state.uploadExpiryDate = "";
     }
@@ -672,7 +722,7 @@
             <h2>Registrazione corso concluso</h2>
             <p>Seleziona un dipendente non compliant, collega il corso all obbligo aperto e registra il nuovo attestato.</p>
           </div>
-          <span class="badge badge-neutral">${candidates.length} dipendenti da sanare</span>
+          <span class="badge badge-neutral">${candidates.length}/${allCandidates.length} risultati</span>
         </div>
 
         <div class="upload-layout">
@@ -680,17 +730,26 @@
             <div class="form-grid">
               <label class="form-field form-field-wide">
                 <span>Dipendente non compliant</span>
-                <select data-filter="uploadEmployeeId" required>
-                  ${candidates
-                    .map((item) =>
-                      option(
-                        item.employee.id,
-                        `${item.employee.surname} ${item.employee.name} - ${item.employee.department} (${item.critical} criticita)`,
-                        state.uploadEmployeeId
-                      )
-                    )
-                    .join("")}
-                </select>
+                <div class="person-search">
+                  <input data-filter="uploadEmployeeQuery" data-action="open-upload-picker" value="${escapeAttr(state.uploadPickerOpen ? state.uploadEmployeeQuery : "")}" placeholder="Cerca per nome, cognome, reparto..." autocomplete="off" role="combobox" aria-expanded="${state.uploadPickerOpen ? "true" : "false"}" aria-controls="uploadPersonPicker" />
+                  ${
+                    state.uploadPickerOpen
+                      ? `<div class="person-picker" id="uploadPersonPicker" role="listbox" aria-label="Dipendenti non compliant filtrati">
+                          ${
+                            candidates.length
+                              ? candidates
+                                  .slice(0, 8)
+                                  .map((item) => uploadCandidateButton(item))
+                                  .join("")
+                              : `<div class="person-picker-empty">Nessun risultato per questa ricerca.</div>`
+                          }
+                        </div>`
+                      : `<div class="selected-person-summary">
+                          <strong>${escapeHtml(selected.employee.surname)} ${escapeHtml(selected.employee.name)}</strong>
+                          <span>${escapeHtml(selected.employee.department)} - ${escapeHtml(selected.employee.job)}</span>
+                        </div>`
+                  }
+                </div>
               </label>
 
               <label class="form-field form-field-wide">
@@ -809,6 +868,31 @@
         <p class="muted">La fonte regolatoria resta la matrice ruolo-obbligo; questo caricamento aggiorna solo l evidenza collegata all obbligo selezionato.</p>
       </div>
     `;
+  }
+
+  function uploadCandidateButton(item) {
+    const active = state.uploadEmployeeId === item.employee.id;
+    return `
+      <button class="person-option ${active ? "is-selected" : ""}" type="button" data-action="select-upload-employee" data-employee-id="${escapeAttr(item.employee.id)}">
+        <span>
+          <strong>${escapeHtml(item.employee.surname)} ${escapeHtml(item.employee.name)}</strong>
+          <small>${escapeHtml(item.employee.department)} - ${escapeHtml(item.employee.job)}</small>
+        </span>
+        <span class="badge badge-danger">${item.critical} criticita</span>
+      </button>
+    `;
+  }
+
+  function selectUploadEmployee(employeeId) {
+    const aggregate = state.model.employeeMap.get(employeeId);
+    if (!aggregate) return;
+    state.uploadEmployeeId = employeeId;
+    state.uploadEmployeeQuery = "";
+    state.uploadPickerOpen = false;
+    state.uploadObligationId = "";
+    state.uploadExpiryDate = "";
+    state.uploadFileName = "";
+    renderCurrentView();
   }
 
   function renderMatrix() {
@@ -937,7 +1021,7 @@
           </section>
 
           <section class="report-section">
-            <h3>Prime priorita</h3>
+            <h3>Prime priorità</h3>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -1085,6 +1169,7 @@
     const employeeMap = new Map(employeeAggregates.map((item) => [item.employee.id, item]));
     const stats = buildStats(employees, obligations);
     const departmentStats = buildDepartmentStats(employeeAggregates);
+    const obligationDepartmentStats = buildObligationDepartmentStats(obligations);
 
     return {
       asOfISO,
@@ -1098,6 +1183,7 @@
       employeeStatusCounts: countEmployeeStatuses(employeeAggregates),
       stats,
       departmentStats,
+      obligationDepartmentStats,
       priorityList: obligations.filter((item) => item.isCritical || item.isAlert).sort(sortByPriority),
     };
   }
@@ -1205,6 +1291,28 @@
     return Array.from(map.values()).sort((a, b) => a.department.localeCompare(b.department));
   }
 
+  function buildObligationDepartmentStats(obligations) {
+    const map = new Map();
+    obligations.forEach((item) => {
+      const key = item.department || "n.d.";
+      if (!map.has(key)) {
+        map.set(key, {
+          department: key,
+          conforming: 0,
+          expiring: 0,
+          nonCompliant: 0,
+          total: 0,
+        });
+      }
+      const row = map.get(key);
+      row.total += 1;
+      if (item.isCritical) row.nonCompliant += 1;
+      else if (item.isAlert) row.expiring += 1;
+      else row.conforming += 1;
+    });
+    return Array.from(map.values()).sort((a, b) => a.department.localeCompare(b.department));
+  }
+
   function countEmployeeStatuses(employeeAggregates) {
     return employeeAggregates.reduce(
       (acc, item) => {
@@ -1286,6 +1394,121 @@
     `;
   }
 
+  function complianceDepartmentChart(rows) {
+    if (!rows.length) return emptySmall("Nessun reparto disponibile per il grafico.");
+
+    const values = rows.flatMap((row) => [row.conforming, row.expiring, row.nonCompliant]);
+    const maxValue = Math.max(5, ...values);
+    const yMax = niceChartMax(maxValue);
+    const yTicks = [yMax, Math.round(yMax * 0.75), Math.round(yMax * 0.5), Math.round(yMax * 0.25), 0];
+    const plot = { x: 62, y: 26, width: 820, height: 230 };
+    const groupWidth = plot.width / rows.length;
+    const barWidth = Math.min(28, Math.max(14, groupWidth / 5));
+    const barGap = 7;
+    const colors = {
+      conforming: "var(--primary)",
+      expiring: "var(--accent)",
+      nonCompliant: "var(--danger)",
+    };
+
+    const grid = yTicks
+      .map((tick) => {
+        const y = plot.y + plot.height - (tick / yMax) * plot.height;
+        return `
+          <line class="chart-grid" x1="${plot.x}" y1="${y}" x2="${plot.x + plot.width}" y2="${y}" />
+          <text class="chart-axis-label" x="${plot.x - 12}" y="${y + 4}" text-anchor="end">${tick}</text>
+        `;
+      })
+      .join("");
+
+    const chartRows = rows.map((row, index) => {
+      const center = plot.x + groupWidth * index + groupWidth / 2;
+      const start = center - (barWidth * 3 + barGap * 2) / 2;
+      const tooltipWidth = 214;
+      const tooltipHeight = 124;
+      const tooltipX = clamp(center - tooltipWidth / 2, plot.x + 4, plot.x + plot.width - tooltipWidth - 4);
+      const tooltipY = plot.y + 10;
+      return {
+        row,
+        center,
+        start,
+        hoverX: plot.x + groupWidth * index + 3,
+        hoverWidth: Math.max(10, groupWidth - 6),
+        tooltipWidth,
+        tooltipHeight,
+        tooltipX,
+        tooltipY,
+      };
+    });
+
+    const bars = chartRows
+      .map((item) => {
+        const row = item.row;
+        return `
+          <g>
+            ${chartBar(item.start, row.conforming, yMax, plot, barWidth, colors.conforming)}
+            ${chartBar(item.start + barWidth + barGap, row.expiring, yMax, plot, barWidth, colors.expiring)}
+            ${chartBar(item.start + (barWidth + barGap) * 2, row.nonCompliant, yMax, plot, barWidth, colors.nonCompliant)}
+            <text class="chart-x-label" x="${item.center}" y="${plot.y + plot.height + 25}" text-anchor="middle">${escapeSvg(shortLabel(row.department, 15))}</text>
+          </g>
+        `;
+      })
+      .join("");
+
+    const tooltips = chartRows
+      .map((item) => {
+        const row = item.row;
+        return `
+          <g class="chart-group" tabindex="0" aria-label="${escapeAttr(row.department)}: ${row.conforming} conformi, ${row.expiring} in scadenza, ${row.nonCompliant} non conformi">
+            <rect class="chart-hover-band" x="${item.hoverX}" y="${plot.y}" width="${item.hoverWidth}" height="${plot.height}" rx="8" />
+            <g class="chart-tooltip" transform="translate(${item.tooltipX}, ${item.tooltipY})">
+              <rect width="${item.tooltipWidth}" height="${item.tooltipHeight}" rx="9" />
+              <text class="chart-tooltip-title" x="16" y="28">${escapeSvg(shortLabel(row.department, 20))}</text>
+              <text class="chart-tooltip-line tooltip-success" x="16" y="58">Conformi: ${row.conforming}</text>
+              <text class="chart-tooltip-line tooltip-warning" x="16" y="84">In scadenza: ${row.expiring}</text>
+              <text class="chart-tooltip-line tooltip-danger" x="16" y="110">Non conformi: ${row.nonCompliant}</text>
+            </g>
+          </g>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="department-chart" aria-label="Compliance per reparto">
+        <svg viewBox="0 0 920 320" role="img">
+          <g>
+            ${grid}
+            <line class="chart-axis" x1="${plot.x}" y1="${plot.y + plot.height}" x2="${plot.x + plot.width}" y2="${plot.y + plot.height}" />
+            <line class="chart-axis" x1="${plot.x}" y1="${plot.y}" x2="${plot.x}" y2="${plot.y + plot.height}" />
+            ${bars}
+            ${tooltips}
+          </g>
+        </svg>
+        <div class="chart-legend">
+          <span><i style="background:${colors.conforming}"></i>Conformi</span>
+          <span><i style="background:${colors.expiring}"></i>In scadenza</span>
+          <span><i style="background:${colors.nonCompliant}"></i>Non conformi</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function chartBar(x, value, yMax, plot, width, color) {
+    const height = Math.max(0, (value / yMax) * plot.height);
+    const y = plot.y + plot.height - height;
+    return `
+      <rect class="chart-bar" x="${x}" y="${y}" width="${width}" height="${height}" rx="5" fill="${color}"></rect>
+    `;
+  }
+
+  function niceChartMax(value) {
+    if (value <= 12) return 12;
+    if (value <= 20) return 20;
+    if (value <= 40) return 40;
+    if (value <= 60) return 60;
+    return Math.ceil(value / 25) * 25;
+  }
+
   function priorityItem(item) {
     return `
       <article class="priority-item">
@@ -1337,7 +1560,7 @@
   function employeeRow(employee) {
     const aggregate = state.model.employeeMap.get(employee.id);
     return `
-      <tr>
+      <tr class="${state.selectedEmployeeId === employee.id ? "is-selected-row" : ""}">
         <td>
           <button class="row-button" type="button" data-action="select-employee" data-employee-id="${escapeAttr(employee.id)}">
             ${escapeHtml(employee.name)} ${escapeHtml(employee.surname)}
@@ -1470,6 +1693,8 @@
   function startUploadFor(employeeId, obligationId) {
     state.uploadEmployeeId = employeeId || "";
     state.uploadObligationId = obligationId || "";
+    state.uploadEmployeeQuery = "";
+    state.uploadPickerOpen = false;
     state.uploadIssueDate = todayISO();
     state.uploadExpiryDate = defaultExpiryForUpload();
     state.uploadFileName = "";
@@ -1565,6 +1790,22 @@
       window.localStorage.setItem(LOCAL_UPLOAD_KEY, JSON.stringify(state.uploadedCertificates));
     } catch (error) {
       showToast("Attestato registrato, ma il browser non ha salvato la sessione locale.");
+    }
+  }
+
+  function loadSidebarCollapsed() {
+    try {
+      return window.localStorage.getItem(LOCAL_SIDEBAR_KEY) === "true";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function saveSidebarCollapsed(collapsed) {
+    try {
+      window.localStorage.setItem(LOCAL_SIDEBAR_KEY, String(collapsed));
+    } catch (error) {
+      // La preferenza visiva puo restare solo nella sessione corrente.
     }
   }
 
@@ -1711,6 +1952,13 @@
     return Array.from(new Set(values.filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)));
   }
 
+  function normalizeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
   function percent(value, total) {
     if (!total) return 0;
     return Math.round((value / total) * 100);
@@ -1791,6 +2039,15 @@
 
   function escapeAttr(value) {
     return escapeHtml(value);
+  }
+
+  function escapeSvg(value) {
+    return escapeHtml(value);
+  }
+
+  function shortLabel(value, maxLength) {
+    const text = String(value || "");
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
   }
 
   document.addEventListener("DOMContentLoaded", init);
