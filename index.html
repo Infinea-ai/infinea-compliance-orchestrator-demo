@@ -11,6 +11,85 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <section class="login-screen" id="loginScreen" aria-label="Accesso applicazione">
+      <div class="login-shell">
+        <div class="login-visual" aria-hidden="true">
+          <div class="login-brand">
+            <span class="brand-mark" aria-hidden="true">IA</span>
+            <div>
+              <strong>Infinea AuditMate</strong>
+              <span>Training compliance workspace</span>
+            </div>
+          </div>
+
+          <div class="login-preview">
+            <div class="preview-header">
+              <span>Audit readiness</span>
+              <strong>Live</strong>
+            </div>
+            <div class="preview-score">
+              <strong>75%</strong>
+              <span>readiness</span>
+            </div>
+            <div class="preview-bars">
+              <span style="--bar: 82%"></span>
+              <span style="--bar: 56%"></span>
+              <span style="--bar: 34%"></span>
+            </div>
+            <div class="preview-flow">
+              <span>Excel</span>
+              <i></i>
+              <span>Regole</span>
+              <i></i>
+              <span>Audit</span>
+            </div>
+          </div>
+
+          <div class="login-signal">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+
+        <form class="login-card" id="authForm">
+          <div class="login-copy">
+            <p class="eyebrow">Workspace locale</p>
+            <h1 id="authTitle">Crea workspace</h1>
+            <p id="authSubtitle">Imposta l'accesso demo e prepara il database cliente.</p>
+          </div>
+
+          <label class="form-field" id="companyField">
+            <span>Azienda</span>
+            <input id="authCompany" type="text" autocomplete="organization" placeholder="Es. Cliente demo" />
+          </label>
+
+          <label class="form-field">
+            <span>Email</span>
+            <input id="authEmail" type="email" autocomplete="email" placeholder="admin@azienda.it" required />
+          </label>
+
+          <label class="form-field">
+            <span>Password</span>
+            <span class="password-control">
+              <input id="authPassword" type="password" autocomplete="current-password" placeholder="Minimo 6 caratteri" required />
+              <button class="password-toggle" type="button" id="authPasswordToggle" aria-label="Mostra password" aria-pressed="false">
+                <span class="button-icon" data-icon="eyeOff"></span>
+              </button>
+            </span>
+          </label>
+
+          <p class="login-error" id="authError" aria-live="polite"></p>
+
+          <button class="button button-primary login-submit" type="submit" id="authSubmit">Crea workspace</button>
+
+          <button class="login-switch" type="button" id="authSwitch">
+            Hai gia un account locale? Accedi
+          </button>
+        </form>
+      </div>
+    </section>
+
     <div class="app-shell" id="appShell">
       <aside class="sidebar" aria-label="Navigazione principale">
         <div class="brand">
@@ -27,7 +106,11 @@
         </div>
 
         <nav class="nav" aria-label="Sezioni applicazione">
-          <button class="nav-item is-active" type="button" data-view="dashboard" title="Dashboard">
+          <button class="nav-item is-active" type="button" data-view="setup" title="Importa dati">
+            <span class="nav-icon" data-icon="import"></span>
+            <span class="nav-label">Importa dati</span>
+          </button>
+          <button class="nav-item" type="button" data-view="dashboard" title="Dashboard">
             <span class="nav-icon" data-icon="dashboard"></span>
             <span class="nav-label">Dashboard</span>
           </button>
@@ -54,9 +137,10 @@
         </nav>
 
         <div class="sidebar-footer">
-          <span>Dati pilota</span>
-          <strong id="pilotCompany">Chimiver</strong>
-          <small id="dataStamp">File Excel importati</small>
+          <span>Database cliente</span>
+          <strong id="pilotCompany">Database vuoto</strong>
+          <small id="dataStamp">Importa Excel/CSV</small>
+          <button class="sidebar-logout" type="button" id="logoutBtn">Esci</button>
         </div>
       </aside>
 
@@ -83,7 +167,8 @@
 
         <section class="data-notice" id="dataNotice" aria-live="polite"></section>
 
-        <section id="dashboardView" class="view is-active" aria-label="Dashboard"></section>
+        <section id="setupView" class="view is-active" aria-label="Importa dati"></section>
+        <section id="dashboardView" class="view" aria-label="Dashboard"></section>
         <section id="employeesView" class="view" aria-label="Dipendenti"></section>
         <section id="gapsView" class="view" aria-label="Gap e priorità"></section>
         <section id="uploadView" class="view" aria-label="Carica attestato"></section>
@@ -92,9 +177,10 @@
       </main>
     </div>
 
+    <div id="modalRoot"></div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="data/compliance-data.js"></script>
+    <script src="importer.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

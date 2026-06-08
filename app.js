@@ -1,9 +1,12 @@
 (function () {
   "use strict";
 
-  const source = window.INFINEA_COMPLIANCE_DATA;
+  const LOCAL_DB_KEY = "infinea.auditmate.complianceDatabase.v1";
   const LOCAL_UPLOAD_KEY = "infinea.auditmate.uploadedCertificates.v1";
   const LOCAL_SIDEBAR_KEY = "infinea.auditmate.sidebarCollapsed.v1";
+  const LOCAL_ACCOUNT_KEY = "infinea.auditmate.localAccount.v1";
+  const LOCAL_SESSION_KEY = "infinea.auditmate.localSession.v1";
+  let source = loadComplianceDatabase() || createEmptyComplianceSource();
 
   const icons = {
     dashboard:
@@ -24,11 +27,23 @@
       '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>',
     upload:
       '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
+    import:
+      '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>',
+    calendar:
+      '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/></svg>',
+    eye:
+      '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+    eyeOff:
+      '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18"/><path d="M10.6 10.6a3 3 0 0 0 3.8 3.8"/><path d="M9.9 4.2A10.5 10.5 0 0 1 12 4.0c6.5 0 10 8 10 8a18.2 18.2 0 0 1-3.1 4.3"/><path d="M6.5 6.5A18.8 18.8 0 0 0 2 12s3.5 8 10 8a10.7 10.7 0 0 0 4.1-.8"/></svg>',
     sidebar:
       '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m15 9-3 3 3 3"/></svg>',
   };
 
   const titles = {
+    setup: [
+      "Importa dati",
+      "Parti da un database vuoto e popola l'app caricando Excel o CSV del cliente.",
+    ],
     dashboard: [
       "Dashboard compliance",
       "Stato calcolato da anagrafica, matrice obblighi e attestati.",
@@ -124,7 +139,7 @@
 
   const els = {};
   const state = {
-    view: "dashboard",
+    view: hasComplianceData() ? "dashboard" : "setup",
     asOf: todayISO(),
     employeeSearch: "",
     employeeStatus: "all",
@@ -145,24 +160,31 @@
     uploadNote: "",
     uploadedCertificates: loadUploadedCertificates(),
     sidebarCollapsed: loadSidebarCollapsed(),
+    importCompanyName: "",
+    importBusy: false,
+    importResult: null,
+    importError: "",
     matrixSearch: "",
+    authMode: loadLocalAccount() ? "login" : "signup",
+    authError: "",
+    account: loadLocalAccount(),
+    session: loadLocalSession(),
+    logoutConfirmOpen: false,
+    clearDatabaseConfirmOpen: false,
     model: null,
   };
 
   function init() {
-    if (!source) {
-      document.body.innerHTML =
-        '<main class="main"><section class="empty"><div><h1>Dati non trovati</h1><p>Il file data/compliance-data.js non e stato caricato.</p></div></section></main>';
-      return;
-    }
-
     cacheElements();
     decorateIcons(document);
+    syncAuthScreen({ resetFields: true });
     applySidebarState();
     initMeta();
     bindEvents();
     els.asOfDate.value = state.asOf;
+    syncViewChrome();
     renderAll();
+    enhanceDateInputs(document);
   }
 
   function cacheElements() {
@@ -170,6 +192,7 @@
     els.sidebarToggle = document.getElementById("sidebarToggle");
     els.navItems = Array.from(document.querySelectorAll(".nav-item"));
     els.views = {
+      setup: document.getElementById("setupView"),
       dashboard: document.getElementById("dashboardView"),
       employees: document.getElementById("employeesView"),
       gaps: document.getElementById("gapsView"),
@@ -183,13 +206,27 @@
     els.dataNotice = document.getElementById("dataNotice");
     els.quickReportBtn = document.getElementById("quickReportBtn");
     els.toast = document.getElementById("toast");
+    els.loginScreen = document.getElementById("loginScreen");
+    els.authForm = document.getElementById("authForm");
+    els.authTitle = document.getElementById("authTitle");
+    els.authSubtitle = document.getElementById("authSubtitle");
+    els.authCompany = document.getElementById("authCompany");
+    els.authEmail = document.getElementById("authEmail");
+    els.authPassword = document.getElementById("authPassword");
+    els.authPasswordToggle = document.getElementById("authPasswordToggle");
+    els.authError = document.getElementById("authError");
+    els.authSubmit = document.getElementById("authSubmit");
+    els.authSwitch = document.getElementById("authSwitch");
+    els.companyField = document.getElementById("companyField");
+    els.logoutBtn = document.getElementById("logoutBtn");
+    els.modalRoot = document.getElementById("modalRoot");
   }
 
   function initMeta() {
     document.getElementById("pilotCompany").textContent =
-      source.meta.pilotCompany || "Azienda pilota";
+      hasComplianceData() ? source.meta.pilotCompany || "Azienda cliente" : "Database vuoto";
     document.getElementById("dataStamp").textContent =
-      "Preparato " + formatDate(source.meta.preparedAt.slice(0, 10));
+      hasComplianceData() ? "Importato " + formatDate(source.meta.preparedAt.slice(0, 10)) : "Importa Excel/CSV";
   }
 
   function bindEvents() {
@@ -212,6 +249,25 @@
       state.sidebarCollapsed = !state.sidebarCollapsed;
       saveSidebarCollapsed(state.sidebarCollapsed);
       applySidebarState();
+    });
+
+    els.authForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      handleAuthSubmit();
+    });
+
+    els.authSwitch.addEventListener("click", () => {
+      state.authMode = state.authMode === "login" ? "signup" : "login";
+      state.authError = "";
+      syncAuthScreen({ resetFields: true });
+    });
+
+    els.authPasswordToggle.addEventListener("click", () => {
+      togglePasswordVisibility();
+    });
+
+    els.logoutBtn.addEventListener("click", () => {
+      openLogoutConfirm();
     });
 
     document.addEventListener("input", (event) => {
@@ -242,6 +298,10 @@
     });
 
     document.addEventListener("click", (event) => {
+      if (!event.target.closest(".custom-select")) {
+        closeCustomSelects();
+      }
+
       const insideUploadPicker = event.target.closest(".person-search");
       if (state.uploadPickerOpen && state.view === "upload" && !insideUploadPicker) {
         state.uploadPickerOpen = false;
@@ -275,6 +335,32 @@
       if (action === "view-gaps") {
         setView("gaps");
       }
+      if (action === "view-setup") {
+        setView("setup");
+      }
+      if (action === "open-import-panel") {
+        openImportPanel();
+      }
+      if (action === "process-data-import") {
+        processDataImport();
+      }
+      if (action === "clear-local-database") {
+        openClearDatabaseConfirm();
+      }
+      if (action === "cancel-logout") {
+        closeLogoutConfirm();
+      }
+      if (action === "confirm-logout") {
+        closeLogoutConfirm();
+        logoutLocalSession();
+      }
+      if (action === "cancel-clear-database") {
+        closeClearDatabaseConfirm();
+      }
+      if (action === "confirm-clear-database") {
+        closeClearDatabaseConfirm();
+        clearLocalDatabase();
+      }
       if (action === "start-upload") {
         startUploadFor(target.dataset.employeeId, target.dataset.obligationId);
       }
@@ -284,11 +370,22 @@
       if (action === "open-upload-picker") {
         if (state.uploadPickerOpen) return;
         state.uploadPickerOpen = true;
-        renderCurrentViewPreservingFocus(target);
+        renderCurrentView();
+        focusUploadEmployeeSearch();
       }
     });
 
     document.addEventListener("keydown", (event) => {
+      if (
+        event.key === "Escape" &&
+        (state.logoutConfirmOpen || state.clearDatabaseConfirmOpen)
+      ) {
+        closeAllConfirmModals();
+        return;
+      }
+      if (event.key === "Escape") {
+        closeCustomSelects();
+      }
       if (event.key !== "Escape" || !state.uploadPickerOpen || state.view !== "upload") return;
       state.uploadPickerOpen = false;
       state.uploadEmployeeQuery = "";
@@ -339,17 +436,162 @@
     }
   }
 
+  function focusUploadEmployeeSearch() {
+    window.setTimeout(() => {
+      const input = els.views.upload.querySelector('[data-filter="uploadEmployeeQuery"]');
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      if (typeof input.setSelectionRange === "function") {
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    }, 0);
+  }
+
+  function enhanceSelects(root) {
+    if (!root) return;
+    root.querySelectorAll("select[data-filter]").forEach((select) => {
+      if (select.dataset.enhanced === "true") return;
+      select.dataset.enhanced = "true";
+      select.classList.add("native-select-hidden");
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "custom-select";
+
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "custom-select-trigger";
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.textContent = select.options[select.selectedIndex]
+        ? select.options[select.selectedIndex].textContent
+        : "Seleziona";
+
+      const menu = document.createElement("div");
+      menu.className = "custom-select-menu";
+      menu.setAttribute("role", "listbox");
+
+      Array.from(select.options).forEach((option) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "custom-select-option";
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", String(option.selected));
+        item.dataset.value = option.value;
+        item.textContent = option.textContent;
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          closeCustomSelects();
+        });
+        menu.appendChild(item);
+      });
+
+      trigger.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const wasOpen = wrapper.classList.contains("is-open");
+        closeCustomSelects();
+        wrapper.classList.toggle("is-open", !wasOpen);
+        trigger.setAttribute("aria-expanded", String(!wasOpen));
+      });
+
+      wrapper.append(trigger, menu);
+      select.insertAdjacentElement("afterend", wrapper);
+    });
+  }
+
+  function enhanceDateInputs(root) {
+    if (!root) return;
+    root.querySelectorAll('input[type="date"]').forEach((input) => {
+      if (input.dataset.dateEnhanced !== "true") {
+        input.dataset.dateEnhanced = "true";
+        input.classList.add("native-date-hidden");
+
+        const wrapper = document.createElement("button");
+        wrapper.type = "button";
+        wrapper.className = "custom-date";
+
+        const value = document.createElement("span");
+        value.className = "custom-date-value";
+
+        const icon = document.createElement("span");
+        icon.className = "custom-date-icon";
+        icon.dataset.icon = "calendar";
+
+        wrapper.append(value, icon);
+        input.insertAdjacentElement("afterend", wrapper);
+        decorateIcons(wrapper);
+
+        wrapper.addEventListener("click", () => {
+          if (wrapper.classList.contains("is-picker-open")) {
+            input.blur();
+            wrapper.classList.remove("is-picker-open");
+            wrapper.setAttribute("aria-expanded", "false");
+            return;
+          }
+          wrapper.classList.add("is-picker-open");
+          wrapper.setAttribute("aria-expanded", "true");
+          input.focus({ preventScroll: true });
+          try {
+            if (typeof input.showPicker === "function") {
+              input.showPicker();
+            } else {
+              input.click();
+            }
+          } catch (error) {
+            input.click();
+          }
+        });
+
+        input.addEventListener("change", () => {
+          syncCustomDate(input);
+          wrapper.classList.remove("is-picker-open");
+          wrapper.setAttribute("aria-expanded", "false");
+        });
+
+        input.addEventListener("blur", () => {
+          window.setTimeout(() => {
+            wrapper.classList.remove("is-picker-open");
+            wrapper.setAttribute("aria-expanded", "false");
+          }, 120);
+        });
+      }
+      syncCustomDate(input);
+    });
+  }
+
+  function syncCustomDate(input) {
+    const wrapper = input.nextElementSibling;
+    if (!wrapper || !wrapper.classList.contains("custom-date")) return;
+    const value = wrapper.querySelector(".custom-date-value");
+    if (!value) return;
+    value.textContent = input.value ? formatDate(input.value) : "Seleziona data";
+  }
+
+  function closeCustomSelects(except) {
+    document.querySelectorAll(".custom-select.is-open").forEach((node) => {
+      if (except && node === except) return;
+      node.classList.remove("is-open");
+      const trigger = node.querySelector(".custom-select-trigger");
+      if (trigger) trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
   function setView(view) {
     state.view = view;
+    syncViewChrome();
+    renderCurrentView();
+  }
+
+  function syncViewChrome() {
     els.navItems.forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.view === view);
+      button.classList.toggle("is-active", button.dataset.view === state.view);
     });
     Object.entries(els.views).forEach(([key, node]) => {
-      node.classList.toggle("is-active", key === view);
+      node.classList.toggle("is-active", key === state.view);
     });
-    els.viewTitle.textContent = titles[view][0];
-    els.viewSubtitle.textContent = titles[view][1];
-    renderCurrentView();
+    els.viewTitle.textContent = titles[state.view][0];
+    els.viewSubtitle.textContent = titles[state.view][1];
   }
 
   function applySidebarState() {
@@ -364,6 +606,189 @@
     els.sidebarToggle.title = collapsed ? "Apri barra laterale" : "Chiudi barra laterale";
   }
 
+  function syncAuthScreen(options = {}) {
+    const isLoggedIn = Boolean(state.session && state.session.email);
+    document.body.classList.toggle("is-authenticated", isLoggedIn);
+    document.body.classList.toggle("is-locked", !isLoggedIn);
+    if (!els.loginScreen) return;
+
+    const hasAccount = Boolean(state.account);
+    if (!hasAccount) state.authMode = "signup";
+    const isSignup = state.authMode === "signup";
+
+    els.authTitle.textContent = isSignup ? "Crea workspace" : "Bentornato";
+    els.authSubtitle.textContent = isSignup
+      ? "Imposta l'accesso demo e prepara il database cliente."
+      : `Accedi al workspace${state.account && state.account.company ? ` di ${state.account.company}` : ""}.`;
+    els.authSubmit.textContent = isSignup ? "Crea workspace" : "Entra";
+    els.authSwitch.textContent = isSignup
+      ? "Hai gia un account locale? Accedi"
+      : "Vuoi creare un nuovo account locale?";
+    els.companyField.classList.toggle("is-hidden", !isSignup);
+    els.authCompany.required = isSignup;
+    if (options.resetFields) {
+      els.authCompany.value = "";
+      els.authEmail.value = isSignup ? "" : state.account ? state.account.email : "";
+      els.authPassword.value = "";
+    }
+    els.authError.textContent = state.authError;
+    syncPasswordToggle();
+  }
+
+  function togglePasswordVisibility() {
+    const shouldShow = els.authPassword.type === "password";
+    els.authPassword.type = shouldShow ? "text" : "password";
+    syncPasswordToggle();
+    els.authPassword.focus({ preventScroll: true });
+  }
+
+  function syncPasswordToggle() {
+    if (!els.authPasswordToggle) return;
+    const isVisible = els.authPassword.type === "text";
+    els.authPasswordToggle.setAttribute("aria-label", isVisible ? "Nascondi password" : "Mostra password");
+    els.authPasswordToggle.setAttribute("aria-pressed", String(isVisible));
+    const icon = els.authPasswordToggle.querySelector("[data-icon]");
+    if (!icon) return;
+    icon.dataset.icon = isVisible ? "eye" : "eyeOff";
+    decorateIcons(els.authPasswordToggle);
+  }
+
+  function handleAuthSubmit() {
+    const email = els.authEmail.value.trim().toLowerCase();
+    const password = els.authPassword.value;
+    const company = els.authCompany.value.trim();
+
+    if (!email || !password) {
+      state.authError = "Inserisci email e password.";
+      syncAuthScreen();
+      return;
+    }
+
+    if (state.authMode === "signup") {
+      if (!company) {
+        state.authError = "Inserisci il nome azienda.";
+        syncAuthScreen();
+        return;
+      }
+      if (password.length < 6) {
+        state.authError = "La password deve avere almeno 6 caratteri.";
+        syncAuthScreen();
+        return;
+      }
+      state.account = {
+        email,
+        password,
+        company,
+        createdAt: new Date().toISOString(),
+      };
+      saveLocalAccount(state.account);
+      startLocalSession(email);
+      showToast("Account locale creato.");
+      return;
+    }
+
+    if (!state.account || email !== state.account.email || password !== state.account.password) {
+      state.authError = "Email o password non corretta.";
+      syncAuthScreen();
+      return;
+    }
+
+    startLocalSession(email);
+    showToast("Accesso effettuato.");
+  }
+
+  function startLocalSession(email) {
+    state.session = {
+      email,
+      startedAt: new Date().toISOString(),
+    };
+    saveLocalSession(state.session);
+    state.authError = "";
+    syncAuthScreen();
+  }
+
+  function logoutLocalSession() {
+    clearLocalSession();
+    state.session = null;
+    state.authMode = state.account ? "login" : "signup";
+    state.authError = "";
+    syncAuthScreen({ resetFields: true });
+    showToast("Sessione chiusa.");
+  }
+
+  function openLogoutConfirm() {
+    if (!state.session) return;
+    state.clearDatabaseConfirmOpen = false;
+    state.logoutConfirmOpen = true;
+    renderConfirmModal();
+  }
+
+  function closeLogoutConfirm() {
+    state.logoutConfirmOpen = false;
+    renderConfirmModal();
+  }
+
+  function openClearDatabaseConfirm() {
+    state.logoutConfirmOpen = false;
+    state.clearDatabaseConfirmOpen = true;
+    renderConfirmModal();
+  }
+
+  function closeClearDatabaseConfirm() {
+    state.clearDatabaseConfirmOpen = false;
+    renderConfirmModal();
+  }
+
+  function closeAllConfirmModals() {
+    state.logoutConfirmOpen = false;
+    state.clearDatabaseConfirmOpen = false;
+    renderConfirmModal();
+  }
+
+  function renderConfirmModal() {
+    if (!els.modalRoot) return;
+    const config = state.logoutConfirmOpen
+      ? {
+          eyebrow: "Conferma uscita",
+          title: "Sei sicuro di voler uscire dall'account?",
+          body: "La sessione locale verra chiusa. I dati importati resteranno salvati in questo browser.",
+          cancelAction: "cancel-logout",
+          confirmAction: "confirm-logout",
+          confirmLabel: "Esci dall'account",
+        }
+      : state.clearDatabaseConfirmOpen
+        ? {
+            eyebrow: "Conferma eliminazione",
+            title: "Vuoi svuotare il database locale?",
+            body: "Questa operazione cancella i dati importati in questo browser. L'account locale resta attivo.",
+            cancelAction: "cancel-clear-database",
+            confirmAction: "confirm-clear-database",
+            confirmLabel: "Svuota database",
+          }
+        : null;
+
+    if (!config) {
+      els.modalRoot.innerHTML = "";
+      return;
+    }
+    els.modalRoot.innerHTML = `
+      <section class="modal-backdrop" role="presentation">
+        <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+          <div class="confirm-modal-icon" aria-hidden="true">IA</div>
+          <div class="confirm-modal-copy">
+            <p class="eyebrow">${config.eyebrow}</p>
+            <h2 id="confirmModalTitle">${config.title}</h2>
+            <p>${config.body}</p>
+          </div>
+          <div class="confirm-modal-actions">
+            <button class="button" type="button" data-action="${config.cancelAction}">Annulla</button>
+            <button class="button button-danger" type="button" data-action="${config.confirmAction}">${config.confirmLabel}</button>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
   function renderAll() {
     state.model = buildComplianceModel(state.asOf);
     renderNotice();
@@ -372,6 +797,12 @@
 
   function renderCurrentView() {
     if (!state.model) state.model = buildComplianceModel(state.asOf);
+    if (state.view === "setup") renderSetup();
+    if (!hasComplianceData() && state.view !== "setup") {
+      renderNoDataView(state.view);
+      decorateIcons(els.views[state.view]);
+      return;
+    }
     if (state.view === "dashboard") renderDashboard();
     if (state.view === "employees") renderEmployees();
     if (state.view === "gaps") renderGaps();
@@ -379,9 +810,18 @@
     if (state.view === "matrix") renderMatrix();
     if (state.view === "report") renderReport();
     decorateIcons(els.views[state.view]);
+    enhanceSelects(els.views[state.view]);
+    enhanceDateInputs(els.views[state.view]);
   }
 
   function renderNotice() {
+    if (!hasComplianceData()) {
+      els.dataNotice.innerHTML = `
+        <span><strong>Database vuoto.</strong> Carica un template Excel/CSV per iniziare a calcolare la compliance.</span>
+        <button class="button button-ghost" type="button" data-action="open-import-panel">Importa dati</button>
+      `;
+      return;
+    }
     const model = state.model;
     const q = source.quality;
     const unknowns =
@@ -391,6 +831,134 @@
       <span><strong>${q.employees}</strong> dipendenti, <strong>${q.requiredObligations}</strong> obblighi, <strong>${q.certificates + localUploads}</strong> attestati${localUploads ? `, inclusi <strong>${localUploads}</strong> caricati in questa sessione` : ""}. Calcolo alla data <strong>${formatDate(state.asOf)}</strong>.</span>
       <span>${unknowns === 0 ? "Dati coerenti: nessun ID dipendente fuori anagrafica." : `${unknowns} anomalie ID da verificare.`}</span>
     `;
+  }
+
+  function renderSetup() {
+    const hasData = hasComplianceData();
+    const q = source.quality || createEmptyQuality();
+    const result = state.importResult;
+    const warnings = result && result.summary ? result.summary.warnings : [];
+    const errors = result && result.summary ? result.summary.errors : [];
+    els.views.setup.innerHTML = `
+      <section class="panel import-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Database cliente</h2>
+            <p>Questa versione parte vuota: i dati entrano solo tramite upload Excel/CSV e vengono salvati nel database locale del browser.</p>
+          </div>
+          <span class="badge ${hasData ? "badge-success" : "badge-neutral"}">${hasData ? "Dati caricati" : "Vuoto"}</span>
+        </div>
+
+        <div class="import-layout">
+          <div class="import-dropzone">
+            <label class="form-field">
+              <span>Nome azienda</span>
+              <input data-filter="importCompanyName" value="${escapeAttr(state.importCompanyName)}" placeholder="Es. Chimiver, Cliente pilota..." />
+            </label>
+            <label class="file-drop" for="dataImportFiles">
+              <span class="mini-icon" data-icon="import"></span>
+              <strong>Carica file Excel o CSV</strong>
+              <span>Accetta tre file o un workbook unico: dipendenti-ruolo, ruolo-corsi e stato attestati.</span>
+              <input id="dataImportFiles" type="file" multiple accept=".xlsx,.csv" />
+            </label>
+            <div class="import-actions">
+              <button class="button button-primary" type="button" data-action="process-data-import" ${state.importBusy ? "disabled" : ""}>
+                <span class="button-icon" data-icon="import"></span>
+                ${state.importBusy ? "Importazione..." : "Importa e popola database"}
+              </button>
+              ${
+                hasData
+                  ? `<button class="button button-danger" type="button" data-action="clear-local-database">Svuota database locale</button>`
+                  : ""
+              }
+            </div>
+            <p class="muted">Per ora il database e locale al browser. Nel backend finale questa stessa struttura andra su Supabase/Postgres per separare i clienti.</p>
+          </div>
+
+          <aside class="import-status">
+            <h3>Stato dati</h3>
+            <div class="detail-grid import-stats">
+              ${detailStat(q.employees || 0, "Dipendenti")}
+              ${detailStat(q.matrixRows || 0, "Righe matrice")}
+              ${detailStat(q.requiredObligations || 0, "Obblighi")}
+              ${detailStat(q.certificates || 0, "Attestati")}
+            </div>
+            ${
+              hasData
+                ? `<div class="manager-summary">
+                    <p><strong>Azienda:</strong> ${escapeHtml(source.meta.pilotCompany || "Azienda cliente")}</p>
+                    <p><strong>Ultimo import:</strong> ${formatDate(String(source.meta.preparedAt || "").slice(0, 10))}</p>
+                    <p><strong>Qualita:</strong> ${(source.quality.unknownEmployeeInObligations || []).length + (source.quality.unknownEmployeeInCertificates || []).length} anomalie ID dipendente.</p>
+                  </div>`
+                : `<p class="muted">Nessun dato importato. Dopo il caricamento la dashboard si aggiornera automaticamente.</p>`
+            }
+          </aside>
+        </div>
+
+        ${
+          state.importError
+            ? `<div class="import-message import-message-error"><strong>Import non completato</strong><span>${escapeHtml(state.importError)}</span></div>`
+            : ""
+        }
+        ${
+          result
+            ? `<div class="import-message ${errors.length ? "import-message-error" : "import-message-success"}">
+                <strong>${errors.length ? "Import completato con errori bloccanti" : "Import completato"}</strong>
+                <span>${result.summary.employees} dipendenti, ${result.summary.requiredObligations} obblighi, ${result.summary.certificateRepository} attestati.</span>
+                ${warnings.length ? `<ul>${warnings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+                ${errors.length ? `<ul>${errors.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+              </div>`
+            : ""
+        }
+      </section>
+
+      <section class="panel detail-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Template atteso</h2>
+            <p>Lo schema consigliato usa tre blocchi dati non ridondanti. Gli obblighi vengono generati automaticamente.</p>
+          </div>
+        </div>
+        <div class="template-grid">
+          ${importTemplateCard("Dipendenti - ruolo", ["Employee ID", "Nome", "Cognome", "Reparto", "Mansione", "Role ID"])}
+          ${importTemplateCard("Ruolo - corsi", ["Role ID", "Course ID", "Corso obbligatorio", "Rinnovo mesi", "Profilo rischio corso"])}
+          ${importTemplateCard("Stato attestati", ["Employee ID", "Course ID", "Certificate Presence", "Issue Date", "Expiry Date"])}
+        </div>
+      </section>
+    `;
+  }
+
+  function importTemplateCard(title, fields) {
+    return `
+      <article class="template-card">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${fields.map((field) => `<code>${escapeHtml(field)}</code>`).join("")}</span>
+      </article>
+    `;
+  }
+
+  function renderNoDataView(view) {
+    els.views[view].innerHTML = `
+      <section class="empty empty-import">
+        <div>
+          <h2>Database vuoto</h2>
+          <p>Per usare questa sezione devi prima caricare i dati cliente da Excel o CSV.</p>
+          <button class="button button-primary" type="button" data-action="open-import-panel">
+            <span class="button-icon" data-icon="import"></span>
+            Vai a Importa dati
+          </button>
+        </div>
+      </section>
+    `;
+  }
+
+  function openImportPanel() {
+    setView("setup");
+    const fileInput = document.getElementById("dataImportFiles");
+    if (!fileInput) return;
+    fileInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    fileInput.focus({ preventScroll: true });
+    fileInput.click();
   }
 
   function renderDashboard() {
@@ -730,11 +1298,11 @@
             <div class="form-grid">
               <label class="form-field form-field-wide">
                 <span>Dipendente non compliant</span>
-                <div class="person-search">
-                  <input data-filter="uploadEmployeeQuery" data-action="open-upload-picker" value="${escapeAttr(state.uploadPickerOpen ? state.uploadEmployeeQuery : "")}" placeholder="Cerca per nome, cognome, reparto..." autocomplete="off" role="combobox" aria-expanded="${state.uploadPickerOpen ? "true" : "false"}" aria-controls="uploadPersonPicker" />
+                <div class="person-search ${state.uploadPickerOpen ? "is-open" : ""}">
                   ${
                     state.uploadPickerOpen
-                      ? `<div class="person-picker" id="uploadPersonPicker" role="listbox" aria-label="Dipendenti non compliant filtrati">
+                      ? `<input data-filter="uploadEmployeeQuery" value="${escapeAttr(state.uploadEmployeeQuery)}" placeholder="Cerca per nome, cognome, reparto..." autocomplete="off" role="combobox" aria-expanded="true" aria-controls="uploadPersonPicker" />
+                        <div class="person-picker" id="uploadPersonPicker" role="listbox" aria-label="Dipendenti non compliant filtrati">
                           ${
                             candidates.length
                               ? candidates
@@ -744,10 +1312,13 @@
                               : `<div class="person-picker-empty">Nessun risultato per questa ricerca.</div>`
                           }
                         </div>`
-                      : `<div class="selected-person-summary">
-                          <strong>${escapeHtml(selected.employee.surname)} ${escapeHtml(selected.employee.name)}</strong>
-                          <span>${escapeHtml(selected.employee.department)} - ${escapeHtml(selected.employee.job)}</span>
-                        </div>`
+                      : `<button class="selected-person-summary selected-person-trigger" type="button" data-action="open-upload-picker" aria-expanded="false">
+                          <span>
+                            <strong>${escapeHtml(selected.employee.surname)} ${escapeHtml(selected.employee.name)}</strong>
+                            <small>${escapeHtml(selected.employee.department)} - ${escapeHtml(selected.employee.job)}</small>
+                          </span>
+                          <em>Cerca</em>
+                        </button>`
                   }
                 </div>
               </label>
@@ -1749,6 +2320,69 @@
     setView("employees");
   }
 
+  async function processDataImport() {
+    const input = document.getElementById("dataImportFiles");
+    const files = input ? Array.from(input.files || []) : [];
+    if (!files.length) {
+      showToast("Seleziona almeno un file Excel o CSV da importare.");
+      return;
+    }
+    if (!window.InfineaImporter) {
+      showToast("Modulo import non disponibile.");
+      return;
+    }
+
+    state.importBusy = true;
+    state.importError = "";
+    state.importResult = null;
+    renderCurrentView();
+
+    try {
+      const result = await window.InfineaImporter.importFiles(files, {
+        companyName: state.importCompanyName,
+      });
+      state.importResult = result;
+      if (result.summary.errors.length) {
+        state.importError = "Correggi gli errori bloccanti prima di salvare il database.";
+        showToast("Import letto, ma non salvato per errori bloccanti.");
+        return;
+      }
+
+      source = result.source;
+      state.uploadedCertificates = [];
+      saveUploadedCertificates();
+      saveComplianceDatabase(source);
+      state.model = buildComplianceModel(state.asOf);
+      initMeta();
+      renderNotice();
+      showToast("Database popolato. Dashboard aggiornata.");
+      setView("dashboard");
+    } catch (error) {
+      state.importError = error.message || "Import non riuscito.";
+      showToast(state.importError);
+    } finally {
+      state.importBusy = false;
+      renderCurrentView();
+    }
+  }
+
+  function clearLocalDatabase() {
+    source = createEmptyComplianceSource();
+    state.uploadedCertificates = [];
+    state.importResult = null;
+    state.importError = "";
+    state.selectedEmployeeId = "";
+    state.uploadEmployeeId = "";
+    state.uploadObligationId = "";
+    saveUploadedCertificates();
+    clearComplianceDatabase();
+    state.model = buildComplianceModel(state.asOf);
+    initMeta();
+    renderNotice();
+    setView("setup");
+    showToast("Database locale svuotato.");
+  }
+
   function previewUploadedStatus(obligation) {
     return attachStatus(
       obligation,
@@ -1774,6 +2408,171 @@
   function nextManualCertificateId() {
     const suffix = String(state.uploadedCertificates.length + 1).padStart(3, "0");
     return `CERT-MVP-${compactDateTime()}-${suffix}`;
+  }
+
+  function createEmptyComplianceSource() {
+    return {
+      meta: {
+        productName: "Infinea AuditMate",
+        pilotCompany: "Azienda cliente",
+        scope: "Health & Safety Training Compliance",
+        preparedAt: new Date().toISOString(),
+        sourceFiles: {},
+        notes: ["Database vuoto in attesa di import dati cliente."],
+      },
+      employees: {
+        sheetName: "Employee Registry",
+        headers: ["Employee ID", "Nome", "Cognome", "Reparto", "Mansione", "Role ID", "N. corsi richiesti"],
+        rows: [],
+      },
+      roleObligationMatrix: {
+        sheetName: "Role Obligation Matrix",
+        headers: [
+          "Matrix Row ID",
+          "Role ID",
+          "Reparto",
+          "Mansione",
+          "Course ID",
+          "Corso obbligatorio",
+          "Categoria corso",
+          "Rinnovo mesi",
+          "Profilo rischio corso",
+        ],
+        rows: [],
+      },
+      requiredObligations: {
+        sheetName: "Required Obligations",
+        headers: [
+          "Required Obligation ID",
+          "Employee ID",
+          "Nome",
+          "Cognome",
+          "Reparto",
+          "Mansione",
+          "Role ID",
+          "Course ID",
+          "Corso obbligatorio",
+          "Categoria corso",
+          "Rinnovo mesi",
+          "Profilo rischio corso",
+          "Controllo",
+          "Valore atteso",
+          "Valore effettivo",
+        ],
+        rows: [],
+      },
+      certificateRepository: {
+        sheetName: "Certificate Repository",
+        headers: [
+          "Certificate ID",
+          "Required Obligation ID",
+          "Employee ID",
+          "Nome",
+          "Cognome",
+          "Reparto",
+          "Mansione",
+          "Role ID",
+          "Course ID",
+          "Corso obbligatorio",
+          "Rinnovo mesi",
+          "Certificate Presence",
+          "Issue Date",
+          "Expiry Date",
+          "Evidence File",
+        ],
+        rows: [],
+      },
+      quality: createEmptyQuality(),
+    };
+  }
+
+  function createEmptyQuality() {
+    return {
+      employees: 0,
+      roles: 0,
+      requiredObligations: 0,
+      certificates: 0,
+      matrixRows: 0,
+      missingCertificateRows: [],
+      unknownEmployeeInObligations: [],
+      unknownEmployeeInCertificates: [],
+    };
+  }
+
+  function hasComplianceData() {
+    return Boolean(
+      source &&
+        source.employees &&
+        source.employees.rows &&
+        source.employees.rows.length
+    );
+  }
+
+  function loadComplianceDatabase() {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_DB_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveComplianceDatabase(database) {
+    try {
+      window.localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
+    } catch (error) {
+      showToast("Database importato, ma il browser non e riuscito a salvarlo localmente.");
+    }
+  }
+
+  function clearComplianceDatabase() {
+    try {
+      window.localStorage.removeItem(LOCAL_DB_KEY);
+    } catch (error) {
+      // Se localStorage non e disponibile, lo stato in memoria e gia stato svuotato.
+    }
+  }
+
+  function loadLocalAccount() {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_ACCOUNT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveLocalAccount(account) {
+    try {
+      window.localStorage.setItem(LOCAL_ACCOUNT_KEY, JSON.stringify(account));
+    } catch (error) {
+      showToast("Account creato, ma il browser non e riuscito a salvarlo localmente.");
+    }
+  }
+
+  function loadLocalSession() {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveLocalSession(session) {
+    try {
+      window.localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+    } catch (error) {
+      showToast("Accesso effettuato, ma la sessione non e stata salvata.");
+    }
+  }
+
+  function clearLocalSession() {
+    try {
+      window.localStorage.removeItem(LOCAL_SESSION_KEY);
+    } catch (error) {
+      // La sessione in memoria viene comunque chiusa.
+    }
   }
 
   function loadUploadedCertificates() {
@@ -1810,6 +2609,11 @@
   }
 
   function downloadGapsCsv() {
+    if (!hasComplianceData()) {
+      showToast("Importa prima i dati cliente.");
+      setView("setup");
+      return;
+    }
     const rows = state.model.priorityList.map((item) => ({
       "Required Obligation ID": item.id,
       "Employee ID": item.employeeId,
@@ -1831,6 +2635,11 @@
   }
 
   function downloadSummaryJson() {
+    if (!hasComplianceData()) {
+      showToast("Importa prima i dati cliente.");
+      setView("setup");
+      return;
+    }
     const model = state.model;
     const payload = {
       meta: source.meta,
