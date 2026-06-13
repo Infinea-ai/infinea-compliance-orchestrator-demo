@@ -1,38 +1,77 @@
 # Infinea AuditMate MVP
 
-Applicazione statica per monitorare la compliance formativa salute e sicurezza.
+Applicazione statica per monitorare la compliance formativa salute e sicurezza con account centralizzati e database Supabase.
 
-Questa versione parte da database vuoto: i dati non sono piu precaricati nel codice.
+## Versione v0.4.0
 
-## Accesso locale
+Questa versione sostituisce l'account locale con:
 
-All'apertura l'app mostra una schermata di accesso locale.
+- accesso manager Infinea;
+- accesso cliente con nome, email e password creati dal manager;
+- dati salvati su Supabase/Postgres per singola azienda;
+- pannello manager `Clienti` per creare, aprire e rimuovere clienti.
 
-- Al primo utilizzo si crea un account demo con azienda, email e password.
-- L'account e la sessione vengono salvati nel `localStorage` del browser.
-- Il pulsante `Esci` chiude la sessione locale.
-- Questa protezione serve per simulare il prodotto: non sostituisce un'autenticazione reale backend.
+## Setup Supabase
 
-In produzione l'accesso locale andra sostituito con autenticazione server, per esempio Supabase Auth.
+1. Crea un progetto Supabase free.
+2. In `Authentication > Providers > Email`, per l'MVP disattiva `Confirm email`.
+3. Vai in `SQL Editor`.
+4. Incolla ed esegui tutto il file `supabase-schema.sql`.
+5. Crea il primo utente manager in `Authentication > Users`.
+6. Esegui questa query, sostituendo email e user id del manager:
 
-## Flusso dati
+```sql
+insert into public.profiles (id, email, role)
+values ('USER_ID_DA_AUTH_USERS', 'manager@infinea.ai', 'manager')
+on conflict (id) do update set role = 'manager', email = excluded.email;
+```
 
-1. Apri `index.html`.
-2. Vai in `Importa dati`.
-3. Carica uno o piu file `.xlsx` / `.csv`.
-4. L'importatore legge, normalizza e valida i dati.
-5. Il database locale del browser viene popolato.
-6. Dashboard, dipendenti, gap, matrice e report vengono ricalcolati.
+7. Copia `Project URL` e `anon public key` da `Project Settings > API`.
+8. Inseriscili in `supabase-config.js`:
 
-## Schema dati consigliato
+```js
+window.INFINEA_SUPABASE_CONFIG = {
+  url: "https://YOUR_PROJECT.supabase.co",
+  anonKey: "YOUR_SUPABASE_ANON_KEY",
+};
+```
 
-Lo schema consigliato usa tre blocchi non ridondanti:
+## Flusso manager
 
-- `Employee Registry`: dipendenti e ruolo assegnato.
-- `Role Obligation Matrix`: corsi obbligatori per ogni ruolo.
+1. Apri l'app.
+2. Seleziona `Manager` nella schermata login.
+3. Accedi con l'utente manager creato su Supabase.
+4. Vai in `Clienti`.
+5. Crea un accesso cliente indicando:
+   - nome, per esempio `Chimiver`;
+   - email cliente;
+   - password cliente.
+
+La password aziendale viene salvata nel database come hash tramite `pgcrypto`, non in chiaro.
+
+Dal pannello `Clienti` il manager puo anche eliminare un cliente. L'eliminazione rimuove l'azienda dall'app e cancella i dati compliance collegati tramite cascade nel database.
+
+## Flusso cliente
+
+Il cliente accede con tre campi:
+
+- nome;
+- email;
+- password.
+
+Se l'email non esiste ancora, l'app prova a registrarla su Supabase e poi collega l'utente all'azienda creata dal manager. Se email o password sono errate, l'accesso viene bloccato.
+
+## Import dati
+
+Ogni azienda parte vuota. Dopo l'accesso cliente, oppure dopo che il manager apre una specifica azienda, si caricano i file Excel/CSV.
+
+Schema consigliato:
+
+- `Employee Registry`: dipendenti e ruolo assegnato;
+- `Role Obligation Matrix`: corsi obbligatori per ogni ruolo;
 - `Certificate Repository`: stato reale degli attestati per dipendente e corso.
 
-L'app genera automaticamente gli obblighi richiesti incrociando:
+L'app genera gli obblighi richiesti incrociando:
 
 ```text
 Employee Registry
@@ -45,48 +84,28 @@ Risultato interno
 dipendente -> corsi obbligatori
 ```
 
-Il file `Certificate Repository` viene poi collegato agli obblighi generati tramite:
+I dati importati vengono salvati su Supabase nelle tabelle dell'azienda corrente tramite `organization_id`.
 
-```text
-Employee ID + Course ID
-```
+## File principali
 
-Il vecchio file `Required Obligations` resta supportato come input opzionale, ma non e piu necessario per il flusso standard.
+- `index.html`: app statica.
+- `app.js`: UI, login, dashboard e flussi compliance.
+- `importer.js`: lettura Excel/CSV e normalizzazione.
+- `supabase-adapter.js`: collegamento tra frontend e Supabase.
+- `supabase-config.js`: URL e anon key del progetto Supabase.
+- `supabase-schema.sql`: schema database, RLS e funzioni RPC.
 
-I file possono essere:
+## Sicurezza MVP
 
-- un unico workbook Excel con piu fogli;
-- piu file Excel separati;
-- piu file CSV separati.
+- Row Level Security attiva sulle tabelle multi-cliente.
+- I clienti vedono solo la propria azienda.
+- Il manager vede e gestisce tutte le aziende.
+- La password cliente e hashata nella tabella organizzazioni.
+- La `anon key` Supabase e pubblica per natura, ma le regole RLS proteggono i dati.
 
-## Database locale
+## Limiti noti
 
-In questa fase di sviluppo il database e salvato nel `localStorage` del browser.
-
-Questo significa:
-
-- i dati restano nel browser usato per importarli;
-- non vengono ancora inviati a un backend remoto;
-- il pulsante `Svuota database locale` cancella il dataset importato;
-- in produzione questa struttura sara sostituita da backend, autenticazione e database multi-cliente.
-
-## Backend futuro
-
-La destinazione naturale e:
-
-- frontend su Vercel;
-- autenticazione e database su Supabase/Postgres;
-- storage attestati su Supabase Storage;
-- separazione dati per azienda tramite `organization_id`.
-
-## Logica compliance
-
-Alla data di controllo selezionata:
-
-- `Valido`: attestato presente e scadenza oltre 90 giorni.
-- `In scadenza 90g/60g/30g`: attestato presente, ancora valido, ma da monitorare.
-- `Scaduto`: attestato presente con scadenza precedente alla data di controllo.
-- `Mancante`: obbligo richiesto senza attestato presente.
-- `Metadata incompleti`: attestato presente ma non verificabile per dati mancanti.
-
-Gli obblighi in scadenza sono considerati compliant alla data del controllo, ma entrano nella lista alert.
+- Il primo manager va promosso manualmente via SQL.
+- Non ci sono ancora inviti email automatici.
+- Non c'e ancora reset password avanzato lato prodotto.
+- La password cliente viene usata anche come password Supabase iniziale dell'utente cliente.

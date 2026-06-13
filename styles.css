@@ -351,6 +351,37 @@ body.is-locked .app-shell {
   gap: 8px;
 }
 
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbf9ff;
+  padding: 5px;
+}
+
+.auth-tab {
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 900;
+  transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.auth-tab:hover,
+.auth-tab.is-active {
+  background: #ffffff;
+  color: var(--primary);
+  box-shadow: 0 10px 22px rgba(64, 40, 128, 0.1);
+}
+
+.auth-tab:hover {
+  transform: translateY(-1px);
+}
+
 .login-card input {
   min-height: 40px;
   background: #fbf9ff;
@@ -407,6 +438,10 @@ body.is-locked .app-shell {
   width: 18px;
   height: 18px;
   stroke: currentColor;
+}
+
+.manager-password-control {
+  width: 100%;
 }
 
 .login-copy {
@@ -2186,6 +2221,21 @@ tbody tr:hover {
 .row-button:hover {
   color: var(--accent-strong);
   transform: translateX(2px);
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.row-button-danger {
+  color: var(--danger);
+}
+
+.row-button-danger:hover {
+  color: #7d2f46;
 }
 
 .muted {

@@ -1,12 +1,9 @@
 (function () {
   "use strict";
 
-  const LOCAL_DB_KEY = "infinea.auditmate.complianceDatabase.v1";
   const LOCAL_UPLOAD_KEY = "infinea.auditmate.uploadedCertificates.v1";
   const LOCAL_SIDEBAR_KEY = "infinea.auditmate.sidebarCollapsed.v1";
-  const LOCAL_ACCOUNT_KEY = "infinea.auditmate.localAccount.v1";
-  const LOCAL_SESSION_KEY = "infinea.auditmate.localSession.v1";
-  let source = loadComplianceDatabase() || createEmptyComplianceSource();
+  let source = createEmptyComplianceSource();
 
   const icons = {
     dashboard:
@@ -43,6 +40,10 @@
     setup: [
       "Importa dati",
       "Parti da un database vuoto e popola l'app caricando Excel o CSV del cliente.",
+    ],
+    clients: [
+      "Clienti",
+      "Pannello manager per creare, aprire o rimuovere clienti.",
     ],
     dashboard: [
       "Dashboard compliance",
@@ -165,16 +166,24 @@
     importResult: null,
     importError: "",
     matrixSearch: "",
-    authMode: loadLocalAccount() ? "login" : "signup",
+    authMode: "client",
     authError: "",
-    account: loadLocalAccount(),
-    session: loadLocalSession(),
+    session: null,
+    backendReady: Boolean(window.InfineaBackend && window.InfineaBackend.isConfigured),
+    backendLoading: true,
+    organizations: [],
+    organizationsLoading: false,
+    organizationFormName: "",
+    organizationFormEmail: "",
+    organizationFormPassword: "",
+    organizationPasswordVisible: false,
+    organizationDeleteTargetId: "",
     logoutConfirmOpen: false,
     clearDatabaseConfirmOpen: false,
     model: null,
   };
 
-  function init() {
+  async function init() {
     cacheElements();
     decorateIcons(document);
     syncAuthScreen({ resetFields: true });
@@ -185,6 +194,7 @@
     syncViewChrome();
     renderAll();
     enhanceDateInputs(document);
+    await hydrateBackendSession();
   }
 
   function cacheElements() {
@@ -193,6 +203,7 @@
     els.navItems = Array.from(document.querySelectorAll(".nav-item"));
     els.views = {
       setup: document.getElementById("setupView"),
+      clients: document.getElementById("clientsView"),
       dashboard: document.getElementById("dashboardView"),
       employees: document.getElementById("employeesView"),
       gaps: document.getElementById("gapsView"),
@@ -210,23 +221,36 @@
     els.authForm = document.getElementById("authForm");
     els.authTitle = document.getElementById("authTitle");
     els.authSubtitle = document.getElementById("authSubtitle");
-    els.authCompany = document.getElementById("authCompany");
+    els.authName = document.getElementById("authName");
+    els.authNameLabel = document.getElementById("authNameLabel");
     els.authEmail = document.getElementById("authEmail");
+    els.authEmailLabel = document.getElementById("authEmailLabel");
     els.authPassword = document.getElementById("authPassword");
+    els.authPasswordLabel = document.getElementById("authPasswordLabel");
     els.authPasswordToggle = document.getElementById("authPasswordToggle");
     els.authError = document.getElementById("authError");
     els.authSubmit = document.getElementById("authSubmit");
-    els.authSwitch = document.getElementById("authSwitch");
-    els.companyField = document.getElementById("companyField");
+    els.authTabs = Array.from(document.querySelectorAll("[data-auth-mode]"));
+    els.nameField = document.getElementById("nameField");
     els.logoutBtn = document.getElementById("logoutBtn");
     els.modalRoot = document.getElementById("modalRoot");
   }
 
   function initMeta() {
     document.getElementById("pilotCompany").textContent =
-      hasComplianceData() ? source.meta.pilotCompany || "Azienda cliente" : "Database vuoto";
+      state.session && state.session.organizationName
+        ? state.session.organizationName
+        : hasComplianceData()
+          ? source.meta.pilotCompany || "Azienda cliente"
+          : isManager()
+            ? "Manager Infinea"
+            : "Database vuoto";
     document.getElementById("dataStamp").textContent =
-      hasComplianceData() ? "Importato " + formatDate(source.meta.preparedAt.slice(0, 10)) : "Importa Excel/CSV";
+      isManager() && !state.session.organizationId
+        ? "Controllo clienti"
+        : hasComplianceData()
+          ? "Importato " + formatDate(source.meta.preparedAt.slice(0, 10))
+          : "Importa Excel/CSV";
   }
 
   function bindEvents() {
@@ -256,21 +280,26 @@
       handleAuthSubmit();
     });
 
-    els.authSwitch.addEventListener("click", () => {
-      state.authMode = state.authMode === "login" ? "signup" : "login";
-      state.authError = "";
-      syncAuthScreen({ resetFields: true });
+    els.authTabs.forEach((button) => {
+      button.addEventListener("click", () => {
+        state.authMode = button.dataset.authMode;
+        state.authError = "";
+        syncAuthScreen({ resetFields: true });
+      });
     });
 
-    els.authPasswordToggle.addEventListener("click", () => {
-      togglePasswordVisibility();
-    });
-
-    els.logoutBtn.addEventListener("click", () => {
-      openLogoutConfirm();
-    });
+    if (els.authPasswordToggle) {
+      els.authPasswordToggle.addEventListener("click", () => {
+        togglePasswordVisibility();
+      });
+    }
 
     document.addEventListener("input", (event) => {
+      const formKey = event.target.dataset.managerForm;
+      if (formKey) {
+        state[formKey] = event.target.value;
+        return;
+      }
       const key = event.target.dataset.filter;
       if (!key) return;
       updateFilterState(key, event.target.value);
@@ -292,9 +321,18 @@
     });
 
     document.addEventListener("submit", (event) => {
-      if (event.target.id !== "trainingUploadForm") return;
+      if (event.target.id === "trainingUploadForm") {
+        event.preventDefault();
+        registerTrainingCertificate();
+        return;
+      }
+      if (event.target.id !== "organizationForm") return;
       event.preventDefault();
-      registerTrainingCertificate();
+      createManagerOrganization();
+    });
+
+    els.logoutBtn.addEventListener("click", () => {
+      openLogoutConfirm();
     });
 
     document.addEventListener("click", (event) => {
@@ -314,6 +352,18 @@
       if (!target) return;
 
       const action = target.dataset.action;
+      if (action === "refresh-organizations") {
+        loadOrganizations();
+      }
+      if (action === "select-organization") {
+        selectManagerOrganization(target.dataset.organizationId);
+      }
+      if (action === "toggle-organization-password") {
+        toggleOrganizationPasswordVisibility();
+      }
+      if (action === "request-delete-organization") {
+        openDeleteOrganizationConfirm(target.dataset.organizationId);
+      }
       if (action === "select-employee") {
         state.selectedEmployeeId = target.dataset.employeeId;
         setView("employees");
@@ -361,6 +411,12 @@
         closeClearDatabaseConfirm();
         clearLocalDatabase();
       }
+      if (action === "cancel-delete-organization") {
+        closeDeleteOrganizationConfirm();
+      }
+      if (action === "confirm-delete-organization") {
+        deleteManagerOrganization();
+      }
       if (action === "start-upload") {
         startUploadFor(target.dataset.employeeId, target.dataset.obligationId);
       }
@@ -378,7 +434,7 @@
     document.addEventListener("keydown", (event) => {
       if (
         event.key === "Escape" &&
-        (state.logoutConfirmOpen || state.clearDatabaseConfirmOpen)
+        (state.logoutConfirmOpen || state.clearDatabaseConfirmOpen || state.organizationDeleteTargetId)
       ) {
         closeAllConfirmModals();
         return;
@@ -578,6 +634,7 @@
   }
 
   function setView(view) {
+    if (view === "clients" && !isManager()) view = "setup";
     state.view = view;
     syncViewChrome();
     renderCurrentView();
@@ -585,6 +642,8 @@
 
   function syncViewChrome() {
     els.navItems.forEach((button) => {
+      const managerOnly = button.dataset.managerOnly === "true";
+      button.classList.toggle("is-hidden", managerOnly && !isManager());
       button.classList.toggle("is-active", button.dataset.view === state.view);
     });
     Object.entries(els.views).forEach(([key, node]) => {
@@ -612,26 +671,33 @@
     document.body.classList.toggle("is-locked", !isLoggedIn);
     if (!els.loginScreen) return;
 
-    const hasAccount = Boolean(state.account);
-    if (!hasAccount) state.authMode = "signup";
-    const isSignup = state.authMode === "signup";
+    const isManagerMode = state.authMode === "manager";
 
-    els.authTitle.textContent = isSignup ? "Crea workspace" : "Bentornato";
-    els.authSubtitle.textContent = isSignup
-      ? "Imposta l'accesso demo e prepara il database cliente."
-      : `Accedi al workspace${state.account && state.account.company ? ` di ${state.account.company}` : ""}.`;
-    els.authSubmit.textContent = isSignup ? "Crea workspace" : "Entra";
-    els.authSwitch.textContent = isSignup
-      ? "Hai gia un account locale? Accedi"
-      : "Vuoi creare un nuovo account locale?";
-    els.companyField.classList.toggle("is-hidden", !isSignup);
-    els.authCompany.required = isSignup;
+    els.authTabs.forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.authMode === state.authMode);
+    });
+    els.authTitle.textContent = isManagerMode ? "Accesso manager" : "Accesso cliente";
+    els.authSubtitle.textContent = isManagerMode
+      ? "Usa l'email e la password dell'utente manager creato in Supabase."
+      : "Usa nome, email e password ricevuti dal manager.";
+    els.authSubmit.textContent = state.backendLoading ? "Connessione..." : "Entra";
+    els.authSubmit.disabled = state.backendLoading || !state.backendReady;
+    els.nameField.classList.toggle("is-hidden", isManagerMode);
+    els.authName.required = !isManagerMode;
+    els.authNameLabel.textContent = "Nome";
+    els.authEmailLabel.textContent = "Email";
+    els.authPasswordLabel.textContent = "Password";
+    els.authName.placeholder = "Es. Chimiver";
+    els.authEmail.placeholder = isManagerMode ? "manager@infinea.ai" : "utente@azienda.it";
+    els.authPassword.placeholder = isManagerMode ? "Password manager" : "Password";
     if (options.resetFields) {
-      els.authCompany.value = "";
-      els.authEmail.value = isSignup ? "" : state.account ? state.account.email : "";
+      els.authName.value = "";
+      els.authEmail.value = "";
       els.authPassword.value = "";
     }
-    els.authError.textContent = state.authError;
+    els.authError.textContent = state.backendReady
+      ? state.authError
+      : "Supabase non configurato: compila supabase-config.js con URL e anon key.";
     syncPasswordToggle();
   }
 
@@ -653,72 +719,268 @@
     decorateIcons(els.authPasswordToggle);
   }
 
-  function handleAuthSubmit() {
+  async function handleAuthSubmit() {
     const email = els.authEmail.value.trim().toLowerCase();
     const password = els.authPassword.value;
-    const company = els.authCompany.value.trim();
+    const name = els.authName.value.trim();
 
     if (!email || !password) {
       state.authError = "Inserisci email e password.";
       syncAuthScreen();
       return;
     }
+    if (!state.backendReady) {
+      state.authError = "Configura Supabase prima di accedere.";
+      syncAuthScreen();
+      return;
+    }
+    if (state.authMode === "client" && !name) {
+      state.authError = "Inserisci il nome.";
+      syncAuthScreen();
+      return;
+    }
 
-    if (state.authMode === "signup") {
-      if (!company) {
-        state.authError = "Inserisci il nome azienda.";
-        syncAuthScreen();
+    state.authError = "";
+    state.backendLoading = true;
+    syncAuthScreen();
+    try {
+      const session =
+        state.authMode === "manager"
+          ? await window.InfineaBackend.signInManager(email, password)
+          : await window.InfineaBackend.signInClient(name, email, password);
+      state.authError = "Accesso riuscito. Carico il workspace...";
+      syncAuthScreen();
+      await startLocalSession(session);
+      showToast("Accesso effettuato.");
+    } catch (error) {
+      state.authError = error.message || "Accesso non riuscito.";
+      syncAuthScreen();
+    } finally {
+      state.backendLoading = false;
+      syncAuthScreen();
+    }
+  }
+
+  async function hydrateBackendSession() {
+    state.backendLoading = true;
+    syncAuthScreen();
+    try {
+      if (!window.InfineaBackend || !window.InfineaBackend.isConfigured) {
+        state.backendReady = false;
         return;
       }
+      state.backendReady = true;
+      const session = await window.InfineaBackend.getCurrentSession();
+      if (session) await startLocalSession(session, { silent: true });
+    } catch (error) {
+      state.authError = error.message || "Sessione non caricata.";
+    } finally {
+      state.backendLoading = false;
+      syncAuthScreen();
+    }
+  }
+
+  async function startLocalSession(session, options = {}) {
+    state.session = session;
+    state.authError = "";
+    if (isManager()) {
+      source = createEmptyComplianceSource();
+      state.view = "clients";
+      state.model = buildComplianceModel(state.asOf);
+      initMeta();
+      syncAuthScreen();
+      syncViewChrome();
+      renderAll();
+      await loadOrganizations();
+      if (!options.silent) showToast("Workspace manager aperto.");
+      return;
+    } else if (session.organizationId) {
+      state.importCompanyName = session.organizationName || "";
+      source = createEmptyComplianceSource();
+      state.view = "setup";
+      state.model = buildComplianceModel(state.asOf);
+      initMeta();
+      syncAuthScreen();
+      syncViewChrome();
+      renderAll();
+      try {
+        const loaded = await window.InfineaBackend.loadComplianceSource(session.organizationId);
+        source = loaded || createEmptyComplianceSource();
+        state.view = hasComplianceData() ? "dashboard" : "setup";
+      } catch (error) {
+        showToast(error.message || "Dati azienda non caricati.");
+      }
+    }
+    state.model = buildComplianceModel(state.asOf);
+    initMeta();
+    syncAuthScreen();
+    syncViewChrome();
+    renderAll();
+    if (!options.silent) showToast("Workspace sincronizzato.");
+  }
+
+  async function logoutLocalSession() {
+    try {
+      if (window.InfineaBackend) await window.InfineaBackend.signOut();
+    } catch (error) {
+      showToast(error.message || "Logout non completato.");
+    }
+    state.session = null;
+    source = createEmptyComplianceSource();
+    state.view = "setup";
+    state.authError = "";
+    state.organizations = [];
+    state.model = buildComplianceModel(state.asOf);
+    syncAuthScreen({ resetFields: true });
+    syncViewChrome();
+    renderAll();
+    showToast("Sessione chiusa.");
+  }
+
+  function isManager() {
+    return Boolean(state.session && state.session.role === "manager");
+  }
+
+  function isClient() {
+    return Boolean(state.session && state.session.role === "client");
+  }
+
+  async function loadOrganizations() {
+    if (!isManager() || !state.backendReady) return;
+    state.organizationsLoading = true;
+    renderCurrentView();
+    try {
+      state.organizations = await window.InfineaBackend.listOrganizations();
+    } catch (error) {
+      showToast(error.message || "Clienti non caricati.");
+    } finally {
+      state.organizationsLoading = false;
+      renderCurrentView();
+    }
+  }
+
+  async function createManagerOrganization() {
+    if (!isManager()) return;
+    if (!state.organizationFormName || !state.organizationFormEmail || !state.organizationFormPassword) {
+      showToast("Compila nome, email e password.");
+      return;
+    }
+    try {
+      await window.InfineaBackend.createOrganization(
+        state.organizationFormName,
+        state.organizationFormEmail,
+        state.organizationFormPassword
+      );
+      state.organizationFormName = "";
+      state.organizationFormEmail = "";
+      state.organizationFormPassword = "";
+      state.organizationPasswordVisible = false;
+      showToast("Azienda creata.");
+      await loadOrganizations();
+    } catch (error) {
+      showToast(error.message || "Azienda non creata.");
+    }
+  }
+
+  function toggleOrganizationPasswordVisibility() {
+    state.organizationPasswordVisible = !state.organizationPasswordVisible;
+    renderCurrentView();
+    window.setTimeout(() => {
+      const input = document.getElementById("organizationFormPassword");
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      if (typeof input.setSelectionRange === "function") {
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    }, 0);
+  }
+
+  async function selectManagerOrganization(organizationId) {
+    const organization = state.organizations.find((item) => item.id === organizationId);
+    if (!organization) return;
+    state.session = {
+      ...state.session,
+      organizationId: organization.id,
+      organizationName: organization.name,
+      organizationCode: organization.code,
+    };
+    const loaded = await window.InfineaBackend.loadComplianceSource(organization.id);
+    source = loaded || createEmptyComplianceSource();
+    state.importCompanyName = organization.name;
+    state.view = hasComplianceData() ? "dashboard" : "setup";
+    state.model = buildComplianceModel(state.asOf);
+    initMeta();
+    syncViewChrome();
+    renderAll();
+  }
+
+  function getOrganizationById(organizationId) {
+    return state.organizations.find((item) => item.id === organizationId) || null;
+  }
+
+  function openDeleteOrganizationConfirm(organizationId) {
+    if (!isManager()) return;
+    const organization = getOrganizationById(organizationId);
+    if (!organization) {
+      showToast("Cliente non trovato.");
+      return;
+    }
+    state.logoutConfirmOpen = false;
+    state.clearDatabaseConfirmOpen = false;
+    state.organizationDeleteTargetId = organization.id;
+    renderConfirmModal();
+  }
+
+  function closeDeleteOrganizationConfirm() {
+    state.organizationDeleteTargetId = "";
+    renderConfirmModal();
+  }
+
+  async function deleteManagerOrganization() {
+    if (!isManager() || !state.organizationDeleteTargetId) return;
+    const organizationId = state.organizationDeleteTargetId;
+    const organization = getOrganizationById(organizationId);
+    try {
+      await window.InfineaBackend.deleteOrganization(organizationId);
+      state.organizationDeleteTargetId = "";
+      if (state.session && state.session.organizationId === organizationId) {
+        state.session = {
+          ...state.session,
+          organizationId: null,
+          organizationName: "",
+          organizationCode: "",
+        };
+        source = createEmptyComplianceSource();
+        state.view = "clients";
+        state.model = buildComplianceModel(state.asOf);
+        initMeta();
+      }
+      showToast(`${organization ? organization.name : "Cliente"} eliminato.`);
+      renderConfirmModal();
+      await loadOrganizations();
+      renderAll();
+    } catch (error) {
+      showToast(error.message || "Cliente non eliminato.");
+      closeDeleteOrganizationConfirm();
+    }
+  }
+
+  /*
+  function oldLocalAuthRemoved() {
+    if (false) {
       if (password.length < 6) {
         state.authError = "La password deve avere almeno 6 caratteri.";
         syncAuthScreen();
         return;
       }
-      state.account = {
-        email,
-        password,
-        company,
-        createdAt: new Date().toISOString(),
-      };
-      saveLocalAccount(state.account);
-      startLocalSession(email);
-      showToast("Account locale creato.");
-      return;
     }
-
-    if (!state.account || email !== state.account.email || password !== state.account.password) {
-      state.authError = "Email o password non corretta.";
-      syncAuthScreen();
-      return;
-    }
-
-    startLocalSession(email);
-    showToast("Accesso effettuato.");
   }
-
-  function startLocalSession(email) {
-    state.session = {
-      email,
-      startedAt: new Date().toISOString(),
-    };
-    saveLocalSession(state.session);
-    state.authError = "";
-    syncAuthScreen();
-  }
-
-  function logoutLocalSession() {
-    clearLocalSession();
-    state.session = null;
-    state.authMode = state.account ? "login" : "signup";
-    state.authError = "";
-    syncAuthScreen({ resetFields: true });
-    showToast("Sessione chiusa.");
-  }
+  */
 
   function openLogoutConfirm() {
     if (!state.session) return;
     state.clearDatabaseConfirmOpen = false;
+    state.organizationDeleteTargetId = "";
     state.logoutConfirmOpen = true;
     renderConfirmModal();
   }
@@ -730,6 +992,7 @@
 
   function openClearDatabaseConfirm() {
     state.logoutConfirmOpen = false;
+    state.organizationDeleteTargetId = "";
     state.clearDatabaseConfirmOpen = true;
     renderConfirmModal();
   }
@@ -742,16 +1005,20 @@
   function closeAllConfirmModals() {
     state.logoutConfirmOpen = false;
     state.clearDatabaseConfirmOpen = false;
+    state.organizationDeleteTargetId = "";
     renderConfirmModal();
   }
 
   function renderConfirmModal() {
     if (!els.modalRoot) return;
+    const organizationToDelete = state.organizationDeleteTargetId
+      ? getOrganizationById(state.organizationDeleteTargetId)
+      : null;
     const config = state.logoutConfirmOpen
       ? {
           eyebrow: "Conferma uscita",
           title: "Sei sicuro di voler uscire dall'account?",
-          body: "La sessione locale verra chiusa. I dati importati resteranno salvati in questo browser.",
+          body: "La sessione verra chiusa. I dati importati resteranno salvati nel database Supabase.",
           cancelAction: "cancel-logout",
           confirmAction: "confirm-logout",
           confirmLabel: "Esci dall'account",
@@ -759,13 +1026,22 @@
       : state.clearDatabaseConfirmOpen
         ? {
             eyebrow: "Conferma eliminazione",
-            title: "Vuoi svuotare il database locale?",
-            body: "Questa operazione cancella i dati importati in questo browser. L'account locale resta attivo.",
+            title: "Vuoi svuotare il database azienda?",
+            body: "Questa operazione cancella i dati importati per l'azienda selezionata. Gli account restano attivi.",
             cancelAction: "cancel-clear-database",
             confirmAction: "confirm-clear-database",
             confirmLabel: "Svuota database",
           }
-        : null;
+        : organizationToDelete
+          ? {
+              eyebrow: "Conferma eliminazione",
+              title: `Vuoi eliminare ${organizationToDelete.name}?`,
+              body: "Questa operazione rimuove il cliente dall'app e cancella i dati compliance collegati. L'operazione non si puo annullare.",
+              cancelAction: "cancel-delete-organization",
+              confirmAction: "confirm-delete-organization",
+              confirmLabel: "Elimina cliente",
+            }
+          : null;
 
     if (!config) {
       els.modalRoot.innerHTML = "";
@@ -776,9 +1052,9 @@
         <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
           <div class="confirm-modal-icon" aria-hidden="true">IA</div>
           <div class="confirm-modal-copy">
-            <p class="eyebrow">${config.eyebrow}</p>
-            <h2 id="confirmModalTitle">${config.title}</h2>
-            <p>${config.body}</p>
+            <p class="eyebrow">${escapeHtml(config.eyebrow)}</p>
+            <h2 id="confirmModalTitle">${escapeHtml(config.title)}</h2>
+            <p>${escapeHtml(config.body)}</p>
           </div>
           <div class="confirm-modal-actions">
             <button class="button" type="button" data-action="${config.cancelAction}">Annulla</button>
@@ -797,6 +1073,11 @@
 
   function renderCurrentView() {
     if (!state.model) state.model = buildComplianceModel(state.asOf);
+    if (state.view === "clients") {
+      renderClients();
+      decorateIcons(els.views.clients);
+      return;
+    }
     if (state.view === "setup") renderSetup();
     if (!hasComplianceData() && state.view !== "setup") {
       renderNoDataView(state.view);
@@ -815,9 +1096,16 @@
   }
 
   function renderNotice() {
+    if (state.view === "clients") {
+      els.dataNotice.innerHTML = `
+        <span><strong>Area manager.</strong> Crea un cliente o aprine uno esistente per gestire import e dashboard.</span>
+        <button class="button button-ghost" type="button" data-action="refresh-organizations">Aggiorna clienti</button>
+      `;
+      return;
+    }
     if (!hasComplianceData()) {
       els.dataNotice.innerHTML = `
-        <span><strong>Database vuoto.</strong> Carica un template Excel/CSV per iniziare a calcolare la compliance.</span>
+        <span><strong>Database vuoto.</strong> Carica un template Excel/CSV per iniziare a calcolare la compliance${state.session && state.session.organizationName ? ` di <strong>${escapeHtml(state.session.organizationName)}</strong>` : ""}.</span>
         <button class="button button-ghost" type="button" data-action="open-import-panel">Importa dati</button>
       `;
       return;
@@ -844,7 +1132,7 @@
         <div class="panel-header">
           <div>
             <h2>Database cliente</h2>
-            <p>Questa versione parte vuota: i dati entrano solo tramite upload Excel/CSV e vengono salvati nel database locale del browser.</p>
+            <p>I dati entrano tramite upload Excel/CSV e vengono salvati nel database Supabase dell'azienda selezionata.</p>
           </div>
           <span class="badge ${hasData ? "badge-success" : "badge-neutral"}">${hasData ? "Dati caricati" : "Vuoto"}</span>
         </div>
@@ -852,8 +1140,8 @@
         <div class="import-layout">
           <div class="import-dropzone">
             <label class="form-field">
-              <span>Nome azienda</span>
-              <input data-filter="importCompanyName" value="${escapeAttr(state.importCompanyName)}" placeholder="Es. Chimiver, Cliente pilota..." />
+              <span>Nome azienda nel report</span>
+              <input data-filter="importCompanyName" value="${escapeAttr(state.importCompanyName)}" placeholder="Es. Chimiver" />
             </label>
             <label class="file-drop" for="dataImportFiles">
               <span class="mini-icon" data-icon="import"></span>
@@ -868,11 +1156,11 @@
               </button>
               ${
                 hasData
-                  ? `<button class="button button-danger" type="button" data-action="clear-local-database">Svuota database locale</button>`
+                  ? `<button class="button button-danger" type="button" data-action="clear-local-database">Svuota database azienda</button>`
                   : ""
               }
             </div>
-            <p class="muted">Per ora il database e locale al browser. Nel backend finale questa stessa struttura andra su Supabase/Postgres per separare i clienti.</p>
+            <p class="muted">I dati sono separati per azienda tramite organization_id e policy Supabase.</p>
           </div>
 
           <aside class="import-status">
@@ -934,6 +1222,87 @@
         <strong>${escapeHtml(title)}</strong>
         <span>${fields.map((field) => `<code>${escapeHtml(field)}</code>`).join("")}</span>
       </article>
+    `;
+  }
+
+  function renderClients() {
+    const organizations = state.organizations || [];
+    const passwordIcon = state.organizationPasswordVisible ? "eye" : "eyeOff";
+    const passwordType = state.organizationPasswordVisible ? "text" : "password";
+    els.views.clients.innerHTML = `
+      <section class="panel import-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Clienti gestiti</h2>
+            <p>Crea l'accesso cliente con nome, email e password. Sono gli stessi tre dati usati poi nel login cliente.</p>
+          </div>
+          <button class="button" type="button" data-action="refresh-organizations">
+            Aggiorna
+          </button>
+        </div>
+        <div class="import-layout">
+          <form class="import-status" id="organizationForm">
+            <h3>Nuova azienda</h3>
+            <label class="form-field">
+              <span>Nome</span>
+              <input data-manager-form="organizationFormName" value="${escapeAttr(state.organizationFormName)}" placeholder="Es. Chimiver" required />
+            </label>
+            <label class="form-field">
+              <span>Email</span>
+              <input data-manager-form="organizationFormEmail" value="${escapeAttr(state.organizationFormEmail)}" type="email" placeholder="cliente@azienda.it" required />
+            </label>
+            <label class="form-field">
+              <span>Password</span>
+              <span class="password-control manager-password-control">
+                <input id="organizationFormPassword" data-manager-form="organizationFormPassword" value="${escapeAttr(state.organizationFormPassword)}" type="${passwordType}" placeholder="Password da comunicare al cliente" required />
+                <button class="password-toggle" type="button" data-action="toggle-organization-password" aria-label="${state.organizationPasswordVisible ? "Nascondi password" : "Mostra password"}" aria-pressed="${String(state.organizationPasswordVisible)}">
+                  <span class="button-icon" data-icon="${passwordIcon}"></span>
+                </button>
+              </span>
+            </label>
+            <button class="button button-primary" type="submit">Crea accesso cliente</button>
+            <p class="muted">Il cliente entrerà con questi tre campi. La password viene salvata come hash.</p>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Azienda</th>
+                  <th>Email</th>
+                  <th>Utenti</th>
+                  <th>Dipendenti</th>
+                  <th>Ultimo import</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${
+                  state.organizationsLoading
+                    ? `<tr><td colspan="6">Caricamento clienti...</td></tr>`
+                    : organizations.length
+                      ? organizations.map((item) => `
+                          <tr>
+                            <td><strong>${escapeHtml(item.name)}</strong></td>
+                            <td>${escapeHtml(formatAccessEmail(item.code))}</td>
+                            <td>${item.userCount || 0}</td>
+                            <td>${item.employeeCount || 0}</td>
+                            <td>${item.lastImport ? formatDate(String(item.lastImport.created_at).slice(0, 10)) : "n.d."}</td>
+                            <td>
+                              <div class="table-actions">
+                                <button class="row-button" type="button" data-action="select-organization" data-organization-id="${escapeAttr(item.id)}">Apri</button>
+                                <button class="row-button row-button-danger" type="button" data-action="request-delete-organization" data-organization-id="${escapeAttr(item.id)}">Elimina</button>
+                              </div>
+                            </td>
+                          </tr>
+                        `).join("")
+                      : `<tr><td colspan="6">Nessuna azienda creata.</td></tr>`
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     `;
   }
 
@@ -2272,7 +2641,7 @@
     setView("upload");
   }
 
-  function registerTrainingCertificate() {
+  async function registerTrainingCertificate() {
     const obligation = state.model.obligations.find((item) => item.id === state.uploadObligationId);
     const aggregate = state.model.employeeMap.get(state.uploadEmployeeId);
     if (!obligation || !aggregate) {
@@ -2307,8 +2676,32 @@
       createdAt: new Date().toISOString(),
     };
 
-    state.uploadedCertificates.push(certificate);
-    saveUploadedCertificates();
+    source.certificateRepository.rows.push({
+      "Certificate ID": certificate.id,
+      "Required Obligation ID": certificate.obligationId,
+      "Employee ID": certificate.employeeId,
+      Nome: aggregate.employee.name,
+      Cognome: aggregate.employee.surname,
+      Reparto: certificate.department,
+      Mansione: certificate.job,
+      "Role ID": certificate.roleId,
+      "Course ID": certificate.courseId,
+      "Corso obbligatorio": certificate.courseName,
+      "Rinnovo mesi": certificate.renewalMonths,
+      "Certificate Presence": "Present",
+      "Issue Date": certificate.issueDate,
+      "Expiry Date": certificate.expiryDate,
+      "Evidence File": certificate.evidenceFile,
+    });
+    source.quality.certificates = source.certificateRepository.rows.length;
+    if (state.session && state.session.organizationId) {
+      try {
+        source = await window.InfineaBackend.saveComplianceSource(state.session.organizationId, source);
+      } catch (error) {
+        showToast(error.message || "Attestato non salvato su Supabase.");
+        return;
+      }
+    }
     state.selectedEmployeeId = obligation.employeeId;
     state.uploadObligationId = "";
     state.uploadExpiryDate = "";
@@ -2316,7 +2709,7 @@
     state.uploadNote = "";
     state.model = buildComplianceModel(state.asOf);
     renderNotice();
-    showToast("Attestato registrato e compliance ricalcolata.");
+    showToast("Attestato registrato su Supabase e compliance ricalcolata.");
     setView("employees");
   }
 
@@ -2329,6 +2722,10 @@
     }
     if (!window.InfineaImporter) {
       showToast("Modulo import non disponibile.");
+      return;
+    }
+    if (!state.session || !state.session.organizationId) {
+      showToast("Seleziona o accedi a un'azienda prima di importare.");
       return;
     }
 
@@ -2348,14 +2745,16 @@
         return;
       }
 
+      result.source.meta.pilotCompany =
+        state.importCompanyName || state.session.organizationName || result.source.meta.pilotCompany;
       source = result.source;
       state.uploadedCertificates = [];
       saveUploadedCertificates();
-      saveComplianceDatabase(source);
+      source = await window.InfineaBackend.saveComplianceSource(state.session.organizationId, source);
       state.model = buildComplianceModel(state.asOf);
       initMeta();
       renderNotice();
-      showToast("Database popolato. Dashboard aggiornata.");
+      showToast("Database Supabase popolato. Dashboard aggiornata.");
       setView("dashboard");
     } catch (error) {
       state.importError = error.message || "Import non riuscito.";
@@ -2366,7 +2765,11 @@
     }
   }
 
-  function clearLocalDatabase() {
+  async function clearLocalDatabase() {
+    if (!state.session || !state.session.organizationId) {
+      showToast("Nessuna azienda selezionata.");
+      return;
+    }
     source = createEmptyComplianceSource();
     state.uploadedCertificates = [];
     state.importResult = null;
@@ -2375,12 +2778,17 @@
     state.uploadEmployeeId = "";
     state.uploadObligationId = "";
     saveUploadedCertificates();
-    clearComplianceDatabase();
+    try {
+      await window.InfineaBackend.clearComplianceSource(state.session.organizationId);
+    } catch (error) {
+      showToast(error.message || "Database non svuotato.");
+      return;
+    }
     state.model = buildComplianceModel(state.asOf);
     initMeta();
     renderNotice();
     setView("setup");
-    showToast("Database locale svuotato.");
+    showToast("Database azienda svuotato.");
   }
 
   function previewUploadedStatus(obligation) {
@@ -2508,73 +2916,6 @@
     );
   }
 
-  function loadComplianceDatabase() {
-    try {
-      const raw = window.localStorage.getItem(LOCAL_DB_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function saveComplianceDatabase(database) {
-    try {
-      window.localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(database));
-    } catch (error) {
-      showToast("Database importato, ma il browser non e riuscito a salvarlo localmente.");
-    }
-  }
-
-  function clearComplianceDatabase() {
-    try {
-      window.localStorage.removeItem(LOCAL_DB_KEY);
-    } catch (error) {
-      // Se localStorage non e disponibile, lo stato in memoria e gia stato svuotato.
-    }
-  }
-
-  function loadLocalAccount() {
-    try {
-      const raw = window.localStorage.getItem(LOCAL_ACCOUNT_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function saveLocalAccount(account) {
-    try {
-      window.localStorage.setItem(LOCAL_ACCOUNT_KEY, JSON.stringify(account));
-    } catch (error) {
-      showToast("Account creato, ma il browser non e riuscito a salvarlo localmente.");
-    }
-  }
-
-  function loadLocalSession() {
-    try {
-      const raw = window.localStorage.getItem(LOCAL_SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function saveLocalSession(session) {
-    try {
-      window.localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
-    } catch (error) {
-      showToast("Accesso effettuato, ma la sessione non e stata salvata.");
-    }
-  }
-
-  function clearLocalSession() {
-    try {
-      window.localStorage.removeItem(LOCAL_SESSION_KEY);
-    } catch (error) {
-      // La sessione in memoria viene comunque chiusa.
-    }
-  }
-
   function loadUploadedCertificates() {
     try {
       const raw = window.localStorage.getItem(LOCAL_UPLOAD_KEY);
@@ -2588,7 +2929,7 @@
     try {
       window.localStorage.setItem(LOCAL_UPLOAD_KEY, JSON.stringify(state.uploadedCertificates));
     } catch (error) {
-      showToast("Attestato registrato, ma il browser non ha salvato la sessione locale.");
+      showToast("Attestato registrato, ma il browser non ha salvato la cache temporanea.");
     }
   }
 
@@ -2835,6 +3176,10 @@
       month: "2-digit",
       year: "numeric",
     }).format(date);
+  }
+
+  function formatAccessEmail(value) {
+    return String(value || "").trim().toLowerCase();
   }
 
   function escapeHtml(value) {
