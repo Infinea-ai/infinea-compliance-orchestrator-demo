@@ -14,7 +14,7 @@ Questa versione sostituisce l'account locale con:
 ## Setup Supabase
 
 1. Crea un progetto Supabase free.
-2. In `Authentication > Providers > Email`, per l'MVP disattiva `Confirm email`.
+2. In `Authentication > Providers > Email`, per l'MVP disattiva `Confirm email`. Se resta attivo, il primo accesso cliente viene bloccato da Supabase finche l'utente non conferma l'email.
 3. Vai in `SQL Editor`.
 4. Incolla ed esegui tutto il file `supabase-schema.sql`.
 5. Crea il primo utente manager in `Authentication > Users`.

@@ -422,15 +422,13 @@ body.is-locked .app-shell {
 }
 
 .password-toggle:hover,
-.password-toggle:focus-visible,
-.password-toggle[aria-pressed="true"] {
+.password-toggle:focus-visible {
   background: rgba(224, 144, 56, 0.14);
   box-shadow: 0 8px 18px rgba(224, 144, 56, 0.14);
   color: var(--accent-strong);
 }
 
-.password-toggle:hover,
-.password-toggle[aria-pressed="true"] {
+.password-toggle:hover {
   transform: translateY(-50%) scale(1.04);
 }
 
@@ -1370,6 +1368,32 @@ button:focus-visible {
   padding: 16px;
 }
 
+.clients-panel .import-layout {
+  grid-template-columns: 1fr;
+}
+
+.clients-panel .import-status {
+  grid-template-columns: minmax(180px, 0.85fr) minmax(240px, 1.2fr) minmax(200px, 0.9fr) auto;
+  align-items: end;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(251, 248, 255, 0.72)),
+    #ffffff;
+}
+
+.clients-panel .import-status h3,
+.clients-panel .import-status p {
+  grid-column: 1 / -1;
+}
+
+.clients-panel .import-status h3 {
+  margin-bottom: -4px;
+}
+
+.clients-panel .import-status .button-primary {
+  min-height: 42px;
+  align-self: end;
+}
+
 .import-stats {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2180,12 +2204,55 @@ table {
   min-width: 820px;
 }
 
+.clients-panel table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.clients-panel th:nth-child(1),
+.clients-panel td:nth-child(1) {
+  width: 24%;
+}
+
+.clients-panel th:nth-child(2),
+.clients-panel td:nth-child(2) {
+  width: 31%;
+}
+
+.clients-panel th:nth-child(3),
+.clients-panel td:nth-child(3) {
+  width: 80px;
+}
+
+.clients-panel th:nth-child(4),
+.clients-panel td:nth-child(4) {
+  width: 108px;
+}
+
+.clients-panel th:nth-child(5),
+.clients-panel td:nth-child(5) {
+  width: 128px;
+}
+
+.clients-panel th:nth-child(6),
+.clients-panel td:nth-child(6) {
+  width: 126px;
+}
+
 th,
 td {
   border-bottom: 1px solid rgba(222, 214, 234, 0.72);
   padding: 11px 12px;
   text-align: left;
   vertical-align: top;
+}
+
+.clients-panel th,
+.clients-panel td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 th {
@@ -2490,6 +2557,14 @@ tbody tr:hover {
     position: static;
     max-height: none;
   }
+
+  .clients-panel .import-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clients-panel .import-status .button-primary {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 940px) {
@@ -2591,6 +2666,18 @@ tbody tr:hover {
   .upload-layout,
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .clients-panel .import-status {
+    grid-template-columns: 1fr;
+  }
+
+  .clients-panel .table-wrap {
+    overflow-x: auto;
+  }
+
+  .clients-panel table {
+    min-width: 760px;
   }
 
   .dashboard-status-grid {

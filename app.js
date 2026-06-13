@@ -359,7 +359,7 @@
         selectManagerOrganization(target.dataset.organizationId);
       }
       if (action === "toggle-organization-password") {
-        toggleOrganizationPasswordVisibility();
+        toggleOrganizationPasswordVisibility(target);
       }
       if (action === "request-delete-organization") {
         openDeleteOrganizationConfirm(target.dataset.organizationId);
@@ -705,7 +705,6 @@
     const shouldShow = els.authPassword.type === "password";
     els.authPassword.type = shouldShow ? "text" : "password";
     syncPasswordToggle();
-    els.authPassword.focus({ preventScroll: true });
   }
 
   function syncPasswordToggle() {
@@ -726,6 +725,11 @@
 
     if (!email || !password) {
       state.authError = "Inserisci email e password.";
+      syncAuthScreen();
+      return;
+    }
+    if (password.length < 6) {
+      state.authError = "La password deve avere almeno 6 caratteri.";
       syncAuthScreen();
       return;
     }
@@ -865,6 +869,10 @@
       showToast("Compila nome, email e password.");
       return;
     }
+    if (state.organizationFormPassword.length < 6) {
+      showToast("La password cliente deve avere almeno 6 caratteri.");
+      return;
+    }
     try {
       await window.InfineaBackend.createOrganization(
         state.organizationFormName,
@@ -882,17 +890,17 @@
     }
   }
 
-  function toggleOrganizationPasswordVisibility() {
+  function toggleOrganizationPasswordVisibility(button) {
     state.organizationPasswordVisible = !state.organizationPasswordVisible;
-    renderCurrentView();
-    window.setTimeout(() => {
-      const input = document.getElementById("organizationFormPassword");
-      if (!input) return;
-      input.focus({ preventScroll: true });
-      if (typeof input.setSelectionRange === "function") {
-        input.setSelectionRange(input.value.length, input.value.length);
-      }
-    }, 0);
+    const input = document.getElementById("organizationFormPassword");
+    if (input) input.type = state.organizationPasswordVisible ? "text" : "password";
+    if (!button) return;
+    button.setAttribute("aria-label", state.organizationPasswordVisible ? "Nascondi password" : "Mostra password");
+    button.setAttribute("aria-pressed", String(state.organizationPasswordVisible));
+    const icon = button.querySelector("[data-icon]");
+    if (icon) icon.dataset.icon = state.organizationPasswordVisible ? "eye" : "eyeOff";
+    decorateIcons(button);
+    button.blur();
   }
 
   async function selectManagerOrganization(organizationId) {
@@ -1230,7 +1238,7 @@
     const passwordIcon = state.organizationPasswordVisible ? "eye" : "eyeOff";
     const passwordType = state.organizationPasswordVisible ? "text" : "password";
     els.views.clients.innerHTML = `
-      <section class="panel import-panel">
+      <section class="panel import-panel clients-panel">
         <div class="panel-header">
           <div>
             <h2>Clienti gestiti</h2>
@@ -1254,7 +1262,7 @@
             <label class="form-field">
               <span>Password</span>
               <span class="password-control manager-password-control">
-                <input id="organizationFormPassword" data-manager-form="organizationFormPassword" value="${escapeAttr(state.organizationFormPassword)}" type="${passwordType}" placeholder="Password da comunicare al cliente" required />
+                <input id="organizationFormPassword" data-manager-form="organizationFormPassword" value="${escapeAttr(state.organizationFormPassword)}" type="${passwordType}" minlength="6" placeholder="Minimo 6 caratteri" required />
                 <button class="password-toggle" type="button" data-action="toggle-organization-password" aria-label="${state.organizationPasswordVisible ? "Nascondi password" : "Mostra password"}" aria-pressed="${String(state.organizationPasswordVisible)}">
                   <span class="button-icon" data-icon="${passwordIcon}"></span>
                 </button>

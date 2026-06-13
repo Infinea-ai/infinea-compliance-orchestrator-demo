@@ -46,6 +46,9 @@
     try {
       authSession = await passwordGrant(email, password);
     } catch (error) {
+      if (String(error.message || "").toLowerCase().includes("email non confermata")) {
+        throw error;
+      }
       authSession = await signUp(email, password, {
         organization_id: organization.organization_id,
         organization_name: name,
@@ -54,7 +57,7 @@
       });
     }
     if (!authSession || !authSession.access_token) {
-      throw new Error("Controlla la casella email: Supabase richiede conferma prima dell'accesso.");
+      throw new Error("Supabase sta richiedendo conferma email. Per questa demo vai in Supabase > Authentication > Providers > Email e disattiva Confirm email, poi elimina o conferma manualmente l'utente appena creato e riprova.");
     }
     saveStoredAuthSession(authSession);
     await rpc("join_organization_with_company_password", {
@@ -105,6 +108,9 @@
 
   async function createOrganization(name, email, companyPassword) {
     ensureConfigured();
+    if (String(companyPassword || "").length < 6) {
+      throw new Error("La password cliente deve avere almeno 6 caratteri.");
+    }
     return rpc("manager_create_organization", {
       input_name: name,
       input_code: normalizeAccessEmail(email),
@@ -115,8 +121,9 @@
   async function deleteOrganization(organizationId) {
     ensureConfigured();
     if (!organizationId) throw new Error("Cliente non selezionato.");
-    return rpc("manager_delete_organization", {
-      input_organization_id: organizationId,
+    return rest(`/rest/v1/organizations?id=eq.${encodeURIComponent(organizationId)}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
     });
   }
 
@@ -314,7 +321,7 @@
         return "Email o password non corretta, oppure utente non confermato in Supabase.";
       }
       if (message.toLowerCase().includes("email not confirmed")) {
-        return "Email non confermata: in Supabase abilita Auto Confirm oppure conferma manualmente l'utente.";
+        return "Email non confermata: in Supabase > Authentication > Providers > Email disattiva Confirm email, oppure conferma manualmente l'utente in Authentication > Users.";
       }
       return message;
     } catch (error) {
