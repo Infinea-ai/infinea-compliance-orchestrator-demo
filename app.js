@@ -237,6 +237,10 @@
   }
 
   function initMeta() {
+    const workspaceLabel = document.getElementById("workspaceLabel");
+    if (workspaceLabel) {
+      workspaceLabel.textContent = isManager() && !state.session.organizationId ? "Area manager" : "Database cliente";
+    }
     document.getElementById("pilotCompany").textContent =
       state.session && state.session.organizationName
         ? state.session.organizationName
