@@ -23,11 +23,37 @@
     return hydrateSession(authSession);
   }
 
-  async function signInManager(email, password) {
+  async function signIn(email, password) {
+    ensureConfigured();
+    try {
+      return await signInExistingUser(email, password);
+    } catch (error) {
+      authSession = null;
+      clearStoredAuthSession();
+      try {
+        return await signInClient(email, password);
+      } catch (fallbackError) {
+        authSession = null;
+        clearStoredAuthSession();
+        throw new Error("Accesso non riuscito.");
+      }
+    }
+  }
+
+  async function signInExistingUser(email, password) {
     ensureConfigured();
     authSession = await passwordGrant(email, password);
     saveStoredAuthSession(authSession);
     const session = await hydrateSession(authSession);
+    if (!session || (session.role !== "manager" && !session.organizationId)) {
+      await signOut();
+      throw new Error("Accesso non autorizzato.");
+    }
+    return session;
+  }
+
+  async function signInManager(email, password) {
+    const session = await signInExistingUser(email, password);
     if (!session || session.role !== "manager") {
       await signOut();
       throw new Error("Accesso non autorizzato.");
@@ -35,7 +61,7 @@
     return session;
   }
 
-  async function signInClient(name, email, password) {
+  async function signInClient(email, password) {
     ensureConfigured();
     const accessEmail = normalizeAccessEmail(email);
     const organization = await validateCompanyAccess(accessEmail, password, null);
@@ -51,7 +77,7 @@
       }
       authSession = await signUp(email, password, {
         organization_id: organization.organization_id,
-        organization_name: name,
+        organization_name: organization.organization_name || accessEmail,
         access_email: accessEmail,
         role: "client",
       });
@@ -487,6 +513,7 @@
   window.InfineaBackend = {
     isConfigured: hasConfig,
     getCurrentSession,
+    signIn,
     signInManager,
     signInClient,
     signOut,

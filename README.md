@@ -1,111 +1,110 @@
 # Infinea AuditMate MVP
 
-Applicazione statica per monitorare la compliance formativa salute e sicurezza con account centralizzati e database Supabase.
+Web application per monitorare la compliance formativa salute e sicurezza in aziende clienti diverse, con account centralizzati, dati separati per azienda e dashboard aggiornata da import Excel/CSV.
 
-## Versione v0.4.0
+## Versione v0.4.5
 
-Questa versione sostituisce l'account locale con:
+Questa versione introduce:
 
-- accesso manager Infinea;
-- accesso cliente con nome, email e password creati dal manager;
-- dati salvati su Supabase/Postgres per singola azienda;
-- pannello manager `Clienti` per creare, aprire e rimuovere clienti.
+- login unico con email e password;
+- apertura automatica del pannello corretto in base al ruolo dell'utente;
+- workspace separati per ogni azienda cliente;
+- pannello Infinea `Clienti` per creare, aprire e rimuovere aziende;
+- import dati aziendali da Excel/CSV;
+- dashboard, dipendenti, gap, matrice regole, carica attestato e report.
 
-## Setup Supabase
+## Flusso Accesso
 
-1. Crea un progetto Supabase free.
-2. In `Authentication > Providers > Email`, per l'MVP disattiva `Confirm email`. Se resta attivo, il primo accesso cliente viene bloccato da Supabase finche l'utente non conferma l'email.
-3. Vai in `SQL Editor`.
-4. Incolla ed esegui tutto il file `supabase-schema.sql`.
-5. Crea il primo utente manager in `Authentication > Users`.
-6. Esegui questa query, sostituendo email e user id del manager:
+Tutti accedono dalla stessa schermata:
 
-```sql
-insert into public.profiles (id, email, role)
-values ('USER_ID_DA_AUTH_USERS', 'manager@infinea.ai', 'manager')
-on conflict (id) do update set role = 'manager', email = excluded.email;
+```text
+Email
+Password
 ```
 
-7. Copia `Project URL` e `anon public key` da `Project Settings > API`.
-8. Inseriscili in `supabase-config.js`:
+Dopo il login, il sistema decide automaticamente:
 
-```js
-window.INFINEA_SUPABASE_CONFIG = {
-  url: "https://YOUR_PROJECT.supabase.co",
-  anonKey: "YOUR_SUPABASE_ANON_KEY",
-};
+```text
+Utente Infinea -> pannello manager
+Utente cliente -> workspace della propria azienda
 ```
 
-## Flusso manager
+Il cliente non deve indicare il nome della societa nella schermata di login.
 
-1. Apri l'app.
-2. Seleziona `Manager` nella schermata login.
-3. Accedi con l'utente manager creato su Supabase.
-4. Vai in `Clienti`.
-5. Crea un accesso cliente indicando:
-   - nome, per esempio `Chimiver`;
-   - email cliente;
-   - password cliente.
+## Flusso Manager Infinea
 
-La password aziendale viene salvata nel database come hash tramite `pgcrypto`, non in chiaro.
+Dal pannello `Clienti`, il manager Infinea puo:
 
-Dal pannello `Clienti` il manager puo anche eliminare un cliente. L'eliminazione rimuove l'azienda dall'app e cancella i dati compliance collegati tramite cascade nel database.
+- creare un nuovo workspace cliente;
+- impostare email e password iniziale dell'admin cliente;
+- aprire il workspace di un cliente;
+- eliminare un cliente;
+- verificare stato dati, utenti e import.
 
-## Flusso cliente
+Nel form di creazione cliente il campo `Azienda cliente` serve solo a identificare il workspace nel pannello Infinea. Non e una credenziale di accesso.
 
-Il cliente accede con tre campi:
+## Flusso Cliente
 
-- nome;
-- email;
-- password.
+Il cliente accede con email e password.
 
-Se l'email non esiste ancora, l'app prova a registrarla su Supabase e poi collega l'utente all'azienda creata dal manager. Se email o password sono errate, l'accesso viene bloccato.
+Se l'account e autorizzato, l'app apre il workspace dell'azienda associata. Ogni azienda vede solo i propri dati.
 
-## Import dati
+Ogni workspace parte vuoto. I dati vengono popolati tramite import.
 
-Ogni azienda parte vuota. Dopo l'accesso cliente, oppure dopo che il manager apre una specifica azienda, si caricano i file Excel/CSV.
+## Import Dati
 
 Schema consigliato:
 
 - `Employee Registry`: dipendenti e ruolo assegnato;
-- `Role Obligation Matrix`: corsi obbligatori per ogni ruolo;
+- `Role Obligation Matrix`: corsi obbligatori per ruolo;
 - `Certificate Repository`: stato reale degli attestati per dipendente e corso.
 
-L'app genera gli obblighi richiesti incrociando:
+L'app incrocia i dati cosi:
 
 ```text
-Employee Registry
 dipendente -> ruolo
-
-Role Obligation Matrix
 ruolo -> corsi obbligatori
-
-Risultato interno
-dipendente -> corsi obbligatori
+dipendente -> corsi obbligatori attesi
+attestati presenti -> stato compliance
 ```
 
-I dati importati vengono salvati su Supabase nelle tabelle dell'azienda corrente tramite `organization_id`.
+Dopo l'import, la dashboard viene aggiornata con:
 
-## File principali
-
-- `index.html`: app statica.
-- `app.js`: UI, login, dashboard e flussi compliance.
-- `importer.js`: lettura Excel/CSV e normalizzazione.
-- `supabase-adapter.js`: collegamento tra frontend e Supabase.
-- `supabase-config.js`: URL e anon key del progetto Supabase.
-- `supabase-schema.sql`: schema database, RLS e funzioni RPC.
+- obblighi conformi;
+- obblighi in scadenza;
+- obblighi non conformi;
+- criticita per dipendente;
+- gap per reparto/corso;
+- report manageriale.
 
 ## Sicurezza MVP
 
-- Row Level Security attiva sulle tabelle multi-cliente.
-- I clienti vedono solo la propria azienda.
-- Il manager vede e gestisce tutte le aziende.
-- La password cliente e hashata nella tabella organizzazioni.
-- La `anon key` Supabase e pubblica per natura, ma le regole RLS proteggono i dati.
+La versione attuale prevede:
 
-## Limiti noti
+- account centralizzati;
+- separazione dei dati per azienda;
+- ruoli distinti tra Infinea e cliente;
+- password non salvate in chiaro;
+- accesso negato con messaggio generico in caso di credenziali errate;
+- regole lato database per impedire a un cliente di vedere dati di altre aziende.
 
-- Il primo manager va promosso manualmente via SQL.
-- Non ci sono ancora inviti email automatici.
-- Non c'e ancora reset password avanzato lato prodotto.
-- La password cliente viene usata anche come password Supabase iniziale dell'utente cliente.
+## Limiti Noti
+
+Questa versione e pronta per demo/pilota controllato, ma non ancora per produzione enterprise completa.
+
+Mancano ancora:
+
+- inviti email automatici;
+- reset password avanzato lato prodotto;
+- ruoli cliente dettagliati, per esempio admin, editor e sola lettura;
+- audit log delle azioni importanti;
+- pannello privacy/configurazione aziendale;
+- report PDF/Word rifinito per consegna ufficiale.
+
+## File Principali
+
+- `index.html`: struttura dell'app.
+- `styles.css`: interfaccia e stile Infinea.
+- `app.js`: UI, login, dashboard e flussi compliance.
+- `importer.js`: lettura Excel/CSV e normalizzazione.
+- file backend/configurazione: collegamento al database centrale e regole di accesso.

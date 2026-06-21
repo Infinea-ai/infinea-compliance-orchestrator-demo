@@ -166,7 +166,6 @@
     importResult: null,
     importError: "",
     matrixSearch: "",
-    authMode: "client",
     authError: "",
     session: null,
     backendReady: Boolean(window.InfineaBackend && window.InfineaBackend.isConfigured),
@@ -221,8 +220,6 @@
     els.authForm = document.getElementById("authForm");
     els.authTitle = document.getElementById("authTitle");
     els.authSubtitle = document.getElementById("authSubtitle");
-    els.authName = document.getElementById("authName");
-    els.authNameLabel = document.getElementById("authNameLabel");
     els.authEmail = document.getElementById("authEmail");
     els.authEmailLabel = document.getElementById("authEmailLabel");
     els.authPassword = document.getElementById("authPassword");
@@ -230,8 +227,6 @@
     els.authPasswordToggle = document.getElementById("authPasswordToggle");
     els.authError = document.getElementById("authError");
     els.authSubmit = document.getElementById("authSubmit");
-    els.authTabs = Array.from(document.querySelectorAll("[data-auth-mode]"));
-    els.nameField = document.getElementById("nameField");
     els.logoutBtn = document.getElementById("logoutBtn");
     els.modalRoot = document.getElementById("modalRoot");
   }
@@ -282,14 +277,6 @@
     els.authForm.addEventListener("submit", (event) => {
       event.preventDefault();
       handleAuthSubmit();
-    });
-
-    els.authTabs.forEach((button) => {
-      button.addEventListener("click", () => {
-        state.authMode = button.dataset.authMode;
-        state.authError = "";
-        syncAuthScreen({ resetFields: true });
-      });
     });
 
     if (els.authPasswordToggle) {
@@ -675,27 +662,15 @@
     document.body.classList.toggle("is-locked", !isLoggedIn);
     if (!els.loginScreen) return;
 
-    const isManagerMode = state.authMode === "manager";
-
-    els.authTabs.forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.authMode === state.authMode);
-    });
-    els.authTitle.textContent = isManagerMode ? "Accesso manager" : "Accesso cliente";
-    els.authSubtitle.textContent = isManagerMode
-      ? "Usa l'email e la password dell'utente manager autorizzato."
-      : "Usa nome, email e password ricevuti dal manager.";
+    els.authTitle.textContent = "Accedi a Infinea AuditMate";
+    els.authSubtitle.textContent = "Inserisci email e password: il sistema aprira il workspace corretto.";
     els.authSubmit.textContent = state.backendLoading ? "Connessione..." : "Entra";
     els.authSubmit.disabled = state.backendLoading || !state.backendReady;
-    els.nameField.classList.toggle("is-hidden", isManagerMode);
-    els.authName.required = !isManagerMode;
-    els.authNameLabel.textContent = "Nome";
     els.authEmailLabel.textContent = "Email";
     els.authPasswordLabel.textContent = "Password";
-    els.authName.placeholder = "Es. Chimiver";
-    els.authEmail.placeholder = isManagerMode ? "manager@infinea.ai" : "utente@azienda.it";
-    els.authPassword.placeholder = isManagerMode ? "Password manager" : "Password";
+    els.authEmail.placeholder = "nome@azienda.it";
+    els.authPassword.placeholder = "Password";
     if (options.resetFields) {
-      els.authName.value = "";
       els.authEmail.value = "";
       els.authPassword.value = "";
     }
@@ -725,7 +700,6 @@
   async function handleAuthSubmit() {
     const email = els.authEmail.value.trim().toLowerCase();
     const password = els.authPassword.value;
-    const name = els.authName.value.trim();
 
     if (!email || !password) {
       state.authError = "Inserisci email e password.";
@@ -742,20 +716,11 @@
       syncAuthScreen();
       return;
     }
-    if (state.authMode === "client" && !name) {
-      state.authError = "Inserisci il nome.";
-      syncAuthScreen();
-      return;
-    }
-
     state.authError = "";
     state.backendLoading = true;
     syncAuthScreen();
     try {
-      const session =
-        state.authMode === "manager"
-          ? await window.InfineaBackend.signInManager(email, password)
-          : await window.InfineaBackend.signInClient(name, email, password);
+      const session = await window.InfineaBackend.signIn(email, password);
       state.authError = "Accesso riuscito. Carico il workspace...";
       syncAuthScreen();
       await startLocalSession(session);
@@ -871,7 +836,7 @@
   async function createManagerOrganization() {
     if (!isManager()) return;
     if (!state.organizationFormName || !state.organizationFormEmail || !state.organizationFormPassword) {
-      showToast("Compila nome, email e password.");
+      showToast("Compila azienda cliente, email e password.");
       return;
     }
     if (state.organizationFormPassword.length < 6) {
@@ -1247,7 +1212,7 @@
         <div class="panel-header">
           <div>
             <h2>Clienti gestiti</h2>
-            <p>Crea l'accesso cliente con nome, email e password. Sono gli stessi tre dati usati poi nel login cliente.</p>
+            <p>Crea il workspace cliente e assegna le credenziali iniziali. Il login usa solo email e password.</p>
           </div>
           <button class="button" type="button" data-action="refresh-organizations">
             Aggiorna
@@ -1255,17 +1220,17 @@
         </div>
         <div class="import-layout">
           <form class="import-status" id="organizationForm">
-            <h3>Nuova azienda</h3>
+            <h3>Nuovo cliente</h3>
             <label class="form-field">
-              <span>Nome</span>
+              <span>Azienda cliente</span>
               <input data-manager-form="organizationFormName" value="${escapeAttr(state.organizationFormName)}" placeholder="Es. Chimiver" required />
             </label>
             <label class="form-field">
-              <span>Email</span>
+              <span>Email admin cliente</span>
               <input data-manager-form="organizationFormEmail" value="${escapeAttr(state.organizationFormEmail)}" type="email" placeholder="cliente@azienda.it" required />
             </label>
             <label class="form-field">
-              <span>Password</span>
+              <span>Password iniziale</span>
               <span class="password-control manager-password-control">
                 <input id="organizationFormPassword" data-manager-form="organizationFormPassword" value="${escapeAttr(state.organizationFormPassword)}" type="${passwordType}" minlength="6" placeholder="Minimo 6 caratteri" required />
                 <button class="password-toggle" type="button" data-action="toggle-organization-password" aria-label="${state.organizationPasswordVisible ? "Nascondi password" : "Mostra password"}" aria-pressed="${String(state.organizationPasswordVisible)}">
@@ -1274,7 +1239,7 @@
               </span>
             </label>
             <button class="button button-primary" type="submit">Crea accesso cliente</button>
-            <p class="muted">Il cliente entrerà con questi tre campi. La password viene salvata come hash.</p>
+            <p class="muted">Il nome azienda serve solo a identificare il workspace. Il cliente accede con email e password.</p>
           </form>
 
           <div class="table-wrap">
