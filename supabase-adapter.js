@@ -30,7 +30,7 @@
     const session = await hydrateSession(authSession);
     if (!session || session.role !== "manager") {
       await signOut();
-      throw new Error("Accesso riuscito, ma questo utente non risulta manager. Controlla la tabella public.profiles.");
+      throw new Error("Accesso non autorizzato.");
     }
     return session;
   }
@@ -40,7 +40,7 @@
     const accessEmail = normalizeAccessEmail(email);
     const organization = await validateCompanyAccess(accessEmail, password, null);
     if (!organization || !organization.organization_id) {
-      throw new Error("Email o password cliente non corretta.");
+      throw new Error("Accesso non riuscito.");
     }
 
     try {
@@ -57,7 +57,7 @@
       });
     }
     if (!authSession || !authSession.access_token) {
-      throw new Error("Supabase sta richiedendo conferma email. Per questa demo vai in Supabase > Authentication > Providers > Email e disattiva Confirm email, poi elimina o conferma manualmente l'utente appena creato e riprova.");
+      throw new Error("Accesso non riuscito. Contatta l'amministratore se il problema continua.");
     }
     saveStoredAuthSession(authSession);
     await rpc("join_organization_with_company_password", {
@@ -305,7 +305,7 @@
       return response;
     } catch (error) {
       if (error.name === "AbortError") {
-        throw new Error("Supabase non risponde: controlla connessione, Project URL e chiave anon.");
+        throw new Error("Servizio temporaneamente non disponibile. Riprova tra poco.");
       }
       throw error;
     } finally {
@@ -317,16 +317,16 @@
     try {
       const data = await response.json();
       const message =
-        data.msg || data.message || data.error_description || data.error || `Errore Supabase ${response.status}`;
+        data.msg || data.message || data.error_description || data.error || `Operazione non riuscita ${response.status}`;
       if (message === "Invalid login credentials") {
-        return "Email o password non corretta, oppure utente non confermato in Supabase.";
+        return "Accesso non riuscito.";
       }
       if (message.toLowerCase().includes("email not confirmed")) {
-        return "Email non confermata: in Supabase > Authentication > Providers > Email disattiva Confirm email, oppure conferma manualmente l'utente in Authentication > Users.";
+        return "Accesso non riuscito.";
       }
       return message;
     } catch (error) {
-      return `Errore Supabase ${response.status}`;
+      return `Operazione non riuscita ${response.status}`;
     }
   }
 
@@ -416,7 +416,7 @@
         scope: "Health & Safety Training Compliance",
         preparedAt: new Date().toISOString(),
         sourceFiles: {},
-        notes: ["Database caricato da Supabase."],
+        notes: ["Database caricato dal backend centrale."],
       },
       employees: { sheetName: "Employee Registry", headers: [], rows: employeeRows },
       roleObligationMatrix: { sheetName: "Role Obligation Matrix", headers: [], rows: matrixRows },
@@ -480,7 +480,7 @@
 
   function ensureConfigured() {
     if (!hasConfig) {
-      throw new Error("Supabase non configurato. Inserisci URL e anon key in supabase-config.js.");
+      throw new Error("Accesso non disponibile. Contatta l'amministratore.");
     }
   }
 

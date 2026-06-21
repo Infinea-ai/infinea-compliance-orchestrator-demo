@@ -682,7 +682,7 @@
     });
     els.authTitle.textContent = isManagerMode ? "Accesso manager" : "Accesso cliente";
     els.authSubtitle.textContent = isManagerMode
-      ? "Usa l'email e la password dell'utente manager creato in Supabase."
+      ? "Usa l'email e la password dell'utente manager autorizzato."
       : "Usa nome, email e password ricevuti dal manager.";
     els.authSubmit.textContent = state.backendLoading ? "Connessione..." : "Entra";
     els.authSubmit.disabled = state.backendLoading || !state.backendReady;
@@ -701,7 +701,7 @@
     }
     els.authError.textContent = state.backendReady
       ? state.authError
-      : "Supabase non configurato: compila supabase-config.js con URL e anon key.";
+      : "Accesso non disponibile. Contatta l'amministratore.";
     syncPasswordToggle();
   }
 
@@ -738,7 +738,7 @@
       return;
     }
     if (!state.backendReady) {
-      state.authError = "Configura Supabase prima di accedere.";
+      state.authError = "Accesso non disponibile. Contatta l'amministratore.";
       syncAuthScreen();
       return;
     }
@@ -761,7 +761,8 @@
       await startLocalSession(session);
       showToast("Accesso effettuato.");
     } catch (error) {
-      state.authError = error.message || "Accesso non riuscito.";
+      console.warn("Login failed", error);
+      state.authError = "Accesso non riuscito. Controlla le credenziali e riprova.";
       syncAuthScreen();
     } finally {
       state.backendLoading = false;
@@ -1030,7 +1031,7 @@
       ? {
           eyebrow: "Conferma uscita",
           title: "Sei sicuro di voler uscire dall'account?",
-          body: "La sessione verra chiusa. I dati importati resteranno salvati nel database Supabase.",
+          body: "La sessione verra chiusa. I dati importati resteranno salvati nel database centrale.",
           cancelAction: "cancel-logout",
           confirmAction: "confirm-logout",
           confirmLabel: "Esci dall'account",
@@ -1144,7 +1145,7 @@
         <div class="panel-header">
           <div>
             <h2>Database cliente</h2>
-            <p>I dati entrano tramite upload Excel/CSV e vengono salvati nel database Supabase dell'azienda selezionata.</p>
+            <p>I dati entrano tramite upload Excel/CSV e vengono salvati nel database centrale dell'azienda selezionata.</p>
           </div>
           <span class="badge ${hasData ? "badge-success" : "badge-neutral"}">${hasData ? "Dati caricati" : "Vuoto"}</span>
         </div>
@@ -1172,7 +1173,7 @@
                   : ""
               }
             </div>
-            <p class="muted">I dati sono separati per azienda tramite organization_id e policy Supabase.</p>
+            <p class="muted">I dati sono separati per azienda e protetti da regole di accesso dedicate.</p>
           </div>
 
           <aside class="import-status">
@@ -2710,7 +2711,7 @@
       try {
         source = await window.InfineaBackend.saveComplianceSource(state.session.organizationId, source);
       } catch (error) {
-        showToast(error.message || "Attestato non salvato su Supabase.");
+        showToast(error.message || "Attestato non salvato nel database centrale.");
         return;
       }
     }
@@ -2721,7 +2722,7 @@
     state.uploadNote = "";
     state.model = buildComplianceModel(state.asOf);
     renderNotice();
-    showToast("Attestato registrato su Supabase e compliance ricalcolata.");
+    showToast("Attestato registrato nel database centrale e compliance ricalcolata.");
     setView("employees");
   }
 
@@ -2766,7 +2767,7 @@
       state.model = buildComplianceModel(state.asOf);
       initMeta();
       renderNotice();
-      showToast("Database Supabase popolato. Dashboard aggiornata.");
+      showToast("Database aziendale popolato. Dashboard aggiornata.");
       setView("dashboard");
     } catch (error) {
       state.importError = error.message || "Import non riuscito.";
